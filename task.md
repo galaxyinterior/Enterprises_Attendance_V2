@@ -1,57 +1,97 @@
-# Smart Attendance Ecosystem & Master Panel - Task Checklist
+# Enterprises Attendance V2 — Comprehensive Task Checklist
 
-Project task breakdown organized by priority modules and operational requirements.
-
----
-
-## 🛡️ Module 1: Master Control Panel (Standalone Web Application - `master_panel/`)
-
-- [x] **Standalone Master Project (`master_panel/`)**: Dedicated Web/Desktop control plane built in separate sub-project directory.
-- [x] **Master Login Interface**: Authenticates Super Admin into Master Control Panel.
-- [x] **Public Shop Onboarding Form**: Web/Mobile registration form generating `PENDING` application requests (`APP-XXXXXXXX`).
-- [x] **Master Control Dashboard**: SaaS overview metrics (Total Shops, Active Shops, Paused Shops, Pending Applications, Kiosks).
-- [x] **Shop Approval & Provisioning Engine**: Approval wizard generating unique `shopId` (e.g. `ABC001`), provisioning `ABC001@admin.in` & `ABC001@kiosk.in` accounts in Firebase.
-- [x] **Remote Shop Pause & Resume**: Remote kill-switch to pause/resume any shop with Master Audit Log recording.
-- [x] **Gmail SMTP Notification Worker**: Automatic email alert service to notify Master (`akmtechofficial@gmail.com`) via Gmail SMTP upon new shop registration.
-- [x] **Master Audit Log & Security**: Operational security log viewer for shop provisioning and status changes.
+Master tracking document for the Smart Attendance & Enterprise Management Ecosystem.
 
 ---
 
-## 👤 Module 2: Biometric Face Engine (MobileFaceNet TFLite)
-
-- [x] **Google ML Kit Integration**: Real-time face bounding box and landmark detection on camera stream.
-- [x] **MobileFaceNet Model Asset**: Bundled `assets/mobile_facenet.tflite` model file.
-- [x] **128D Embedding Generator**: Preprocess crop tensor (112x112 RGB), execute TFLite inference via `tflite_flutter`, and extract 128D feature vector.
-- [x] **Cosine Similarity Matcher**: L2 normalization and Cosine distance matching with configurable confidence threshold (>0.70).
-- [ ] **Liveness & Anti-Spoofing Check**: Multi-frame quality validation and liveness check to prevent photo/screen spoofing.
+## 🚀 Phase 0 — Baseline Audit & Code Freeze
+- [x] **Git Repository Migration**: Create new clean repository `https://github.com/galaxyinterior/Enterprises_Attendance_V2.git` and push `main` branch baseline.
+- [x] **Legacy Supabase Prototype Purge**: Remove dead/unused directories (`mobile_app/`, `temp_migration/`, `master_panel/lib/screens/`, `master_panel/lib/utils/email_sender.dart`).
+- [x] **Analyzer Audit**: Run `flutter analyze` across root app and `master_panel` — verify 0 errors.
 
 ---
 
-## 📱 Module 3: Entrance Kiosk Scanner (Device A)
-
-- [x] **Kiosk Full-Screen UI**: Locked-down kiosk UI for entrance devices with live camera scanner overlay.
-- [x] **Instant Match Feedback**: Real-time visual feedback (*"Welcome Ravi Kumar"* or *"Face Not Recognized"*).
-- [x] **Text-To-Speech (TTS) Voice Engine**: Personalized voice announcements (*"Ravi Kumar, Good Morning. Attendance Marked."*).
-- [x] **Offline Attendance Queueing**: SQLite database queue for logging offline check-ins instantly.
-- [x] **Remote Pause Enforcement**: Displays *"Service Temporarily Paused"* notice when shop is paused by Master Admin.
-- [x] **Admin Exit Modal**: PIN/Password protected modal to exit Kiosk mode.
+## 🏗️ Phase 1 — Architecture Consolidation
+- [x] **Canonical Firebase Backend**: Standardize on Firebase Auth, Cloud Firestore, and Firebase Storage.
+- [x] **Role Consolidation**: Establish separation between Master Control Plane (`master_panel/`) and Shop App (`lib/`).
+- [x] **Shared Domain Models**: Verify domain models (`Business`, `Employee`, `AttendanceRecord`, `RegistrationRequest`).
 
 ---
 
-## 💼 Module 4: Shop Admin Console (Device B)
-
-- [x] **Workforce Overview Dashboard**: Today's present, late, absent, and pending checkout statistics.
-- [x] **Employee Directory & Enrollment**: Staff management workspace with face embedding enrollment wizard.
-- [x] **Shift Engine & Attendance Rules**: Configure Morning, Evening, Night shifts, grace periods, and late thresholds.
-- [x] **Staff Advance (Udhaar) Ledger**: Indian shop advance tracking with automated monthly salary deductions.
-- [x] **Announcements & Emergency Alerts**: Broadcast announcements and 1-click Emergency Alert trigger.
-- [ ] **Monthly Payslip Generator**: Generate and download printable monthly payslips with attendance breakdown.
+## 🔐 Phase 2 — Security & Authorization Rules
+- [x] **Firestore Security Rules**: Create production [`firestore.rules`](file:///j:/app%20dev/Attendance%20App/firestore.rules) enforcing tenant isolation under `businesses/{businessId}/...`.
+- [x] **Role-Based Access Control**: Standardize `MASTER`, `ADMIN`, `KIOSK` custom claims and document roles.
+- [x] **Firebase Config Linkage**: Update [`firebase.json`](file:///j:/app%20dev/Attendance%20App/firebase.json) to reference `firestore.rules`.
 
 ---
 
-## ⚡ Module 5: Offline-First Synchronization Engine
+## 👑 Phase 3 — Master Panel (Store Onboarding & Provisioning Workflow)
+- [x] **Manual/Auto Shop ID Generator**: Support manual custom Shop ID input during approval with auto-fallback (`SHOP-XXXXXX`).
+- [x] **Auto Password Generator with Refresh Button**: Add 🔄 generator for admin/kiosk passwords.
+- [x] **Store Registration Request Approval**: Approve application, generate credentials, create `businesses/{businessId}` document.
+- [x] **Automatic Email Credential Dispatch**: Send SMTP email with credentials to store owner upon approval.
+- [x] **Auto-Cleanup On Approval**: Automatically delete processed request document from `registrationrequests` collection upon approval.
+- [ ] **Device Management & Pairing**: View active Kiosks per business, remote pause/resume, unpair devices.
+- [ ] **Master Audit Logs**: Track all provisioning actions, status changes, and admin activities.
 
-- [x] **SQLite Local Database (`attendance_offline.db`)**: Schema for pending attendance queue and local employee embedding cache.
-- [x] **Connectivity Listener**: Real-time network state monitoring via `connectivity_plus`.
-- [x] **Auto-Sync Worker**: Asynchronous background worker pushing pending SQLite records to Cloud Firestore upon internet reconnection.
-- [ ] **Conflict Resolution & Duplicate Prevention**: Safeguards to resolve timestamp conflicts and prevent duplicate attendance entries.
+---
+
+## 🏢 Phase 4 — Admin Panel (Employee Management & Dedicated Enrollment)
+- [ ] **Dedicated Full-Page Add Employee Screen**: Replace dialogs with dedicated full-page screen for employee registration.
+- [ ] **Admin Camera Face Data Capture**: Capture face enrollment image directly from Admin Panel during employee setup.
+- [ ] **Real-time 128D Embedding Generation**: Extract 128D vector during admin enrollment and save to Firestore/SQLite.
+- [ ] **Employee Directory CRUD**: Search, filter, edit, activate/deactivate staff records.
+
+---
+
+## 🧠 Phase 5 — ML Kit + MobileFaceNet 128D Face Engine
+- [x] **ML Kit Detector Integration**: Accurate face detection, landmark bounding box extraction (`google_mlkit_face_detection`).
+- [x] **MobileFaceNet TFLite Model**: Bundled `assets/mobile_facenet.tflite` model execution via `tflite_flutter`.
+- [x] **128D Cosine Similarity Matching**: L2 normalization and cosine similarity match against enrolled embeddings.
+- [ ] **Anti-Spoofing & Multi-Frame Quality**: Blink/head movement verification and multi-frame quality filtering.
+
+---
+
+## 📱 Phase 6 — Kiosk Mode & Entrance Experience
+- [x] **Full-Screen Kiosk UI**: Entrance scanner overlay with camera preview.
+- [x] **Voice Feedback (TTS)**: Personalized voice announcements ("Welcome Ravi Kumar, Attendance Marked").
+- [x] **Remote Kill-Switch Listener**: Display "Service Temporarily Paused" screen when business is paused by Master.
+- [ ] **Kiosk Lock Mode**: PIN-protected admin exit modal and device lock.
+
+---
+
+## ⚡ Phase 7 — Offline-First SQLite Sync Engine
+- [x] **SQLite Database Schema (`attendance_offline.db`)**: Local storage for offline attendance logs and employee embeddings.
+- [x] **Auto-Sync Worker**: Listen to connectivity changes and push queued logs when internet is restored.
+- [ ] **Conflict Resolution & Anti-Duplicate Check**: Prevent double check-ins within configurable window (e.g. 5 mins).
+
+---
+
+## 🇮🇳 Phase 8 — Indian SaaS Features (Shifts, Salary & Udhaar Ledger)
+- [x] **Shift & Attendance Rules**: Morning/Evening/Night shifts, late thresholds, grace period.
+- [x] **Staff Advance (Udhaar) Ledger**: Advance loan tracking and salary deduction calculation.
+- [ ] **Monthly Payslip Generator**: PDF download/print for monthly staff payroll.
+
+---
+
+## 📡 Phase 9 — Multi-Device Pairing & Heartbeat Monitoring
+- [ ] **Kiosk Device Registration**: Unique device ID pairing with business tenant.
+- [ ] **Live Heartbeat Ping**: Periodic heartbeat ping to monitor kiosk online/offline status.
+
+---
+
+## 🎨 Phase 10 — UI Polish & Indian Palette Design System
+- [x] **Unified Palette Tokens (`AppColors`)**:
+  - Kesari Saffron (`#FF7722`)
+  - Haldi Gold (`#F59E0B`)
+  - Mayur Blue (`#0284C7`)
+  - Panna Emerald (`#10B981`)
+  - Sindoor Red (`#EF4444`)
+  - Deep Midnight Slate (`#0B132B`)
+- [x] **Typography & Responsive Design**: Google Fonts (Inter / Outfit) across all screens.
+
+---
+
+## 📦 Phase 11 — Release & CI/CD Pipeline
+- [ ] **Production APK & Web Build Validation**: Execute `flutter build apk` and `flutter build web` for both projects.
+- [ ] **GitHub Final Release Push**: Clean commit history and tagged version release.
