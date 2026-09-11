@@ -12,7 +12,7 @@ import '../../core/services/face_recognition_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../models/employee_model.dart';
 
-enum GuidedEnrollmentStep { center, left, right, completed }
+
 
 class AddEmployeeScreen extends StatefulWidget {
   final String businessId;
@@ -41,17 +41,15 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
   DateTime _joiningDate = DateTime.now();
   String _selectedShift = 'Morning Shift (10:00 AM - 06:30 PM)';
 
-  // Camera & Multi-Angle Guided Face Enrolment State
+  // Camera & Single Straight Face Enrolment State
   CameraController? _cameraController;
   List<CameraDescription> _availableCameras = [];
   bool _isCameraInitialized = false;
   bool _isCapturingFace = false;
   Uint8List? _capturedFaceBytes;
 
-  GuidedEnrollmentStep _currentStep = GuidedEnrollmentStep.center;
-  final List<List<double>> _capturedEmbeddings = [];
   List<double>? _enrolledFaceEmbedding;
-  String _faceStatusMessage = 'Step 1 of 3: Look straight at camera 😐';
+  String _faceStatusMessage = 'Look straight at camera & tap Capture 😐';
   bool _isSaving = false;
 
   final _faceService = FaceRecognitionService();
@@ -103,7 +101,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     super.dispose();
   }
 
-  // Multi-Angle Step-by-Step Face Capture (Center -> Left -> Right)
+  // Single-Step Straight Face Enrolment
   Future<void> _captureAndEnrollFace() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       setState(() {
@@ -120,50 +118,24 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
       final xFile = await _cameraController!.takePicture();
       final bytes = await xFile.readAsBytes();
 
-      String stepName = 'CENTER';
-      if (_currentStep == GuidedEnrollmentStep.left) stepName = 'LEFT';
-      if (_currentStep == GuidedEnrollmentStep.right) stepName = 'RIGHT';
-
       final res = await _faceService.processFaceFromBytesDetailed(
         bytes: bytes,
         tempFilePath: xFile.path,
-        context: 'ENROLLMENT_$stepName',
+        context: 'ENROLLMENT_STRAIGHT',
         employeeId: _empCodeCtrl.text.trim(),
       );
 
       if (res['success'] == true && res['embedding'] != null) {
         final List<double> vec = res['embedding'] as List<double>;
-        _capturedFaceBytes = bytes;
-        _capturedEmbeddings.add(vec);
-
-        if (_currentStep == GuidedEnrollmentStep.center) {
-          setState(() {
-            _currentStep = GuidedEnrollmentStep.left;
-            _faceStatusMessage = '✓ Step 1 Complete! Step 2: Turn head slightly LEFT 👈';
-          });
-        } else if (_currentStep == GuidedEnrollmentStep.left) {
-          setState(() {
-            _currentStep = GuidedEnrollmentStep.right;
-            _faceStatusMessage = '✓ Step 2 Complete! Step 3: Turn head slightly RIGHT 👉';
-          });
-        } else if (_currentStep == GuidedEnrollmentStep.right) {
-          final synthesized = _faceService.synthesizeMultiAngleEmbedding(_capturedEmbeddings);
-          if (synthesized != null) {
-            setState(() {
-              _enrolledFaceEmbedding = synthesized;
-              _currentStep = GuidedEnrollmentStep.completed;
-              _faceStatusMessage = '✓ 3D Multi-Angle Face Profile Enrolled Successfully (${synthesized.length}D Ready)';
-            });
-          } else {
-            setState(() {
-              _faceStatusMessage = '❌ Synthesis failed. Please reset and retry.';
-            });
-          }
-        }
-      } else {
-        final String err = res['error'] ?? 'Face position unclear';
         setState(() {
-          _faceStatusMessage = '❌ $err. Please position head as instructed.';
+          _capturedFaceBytes = bytes;
+          _enrolledFaceEmbedding = vec;
+          _faceStatusMessage = '✓ Face Profile Enrolled Successfully (${vec.length}D Ready)';
+        });
+      } else {
+        final String err = res['error'] ?? 'Face not detected clearly';
+        setState(() {
+          _faceStatusMessage = '❌ $err. Position face straight looking at camera.';
         });
       }
     } catch (e) {
@@ -177,13 +149,11 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     }
   }
 
-  void _resetGuidedEnrollment() {
+  void _resetFaceEnrollment() {
     setState(() {
-      _currentStep = GuidedEnrollmentStep.center;
-      _capturedEmbeddings.clear();
       _enrolledFaceEmbedding = null;
       _capturedFaceBytes = null;
-      _faceStatusMessage = 'Step 1 of 3: Look straight at camera 😐';
+      _faceStatusMessage = 'Look straight at camera & tap Capture 😐';
     });
   }
 
@@ -487,6 +457,8 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
   }
 
   Widget _buildFaceCaptureSection() {
+    final bool isEnrolled = _enrolledFaceEmbedding != null;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -505,35 +477,23 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                   const Icon(Icons.center_focus_strong_rounded, color: AppColors.pannaEmerald, size: 22),
                   const SizedBox(width: 10),
                   Text(
-                    '2. 3D Multi-Angle Enrolment',
+                    '2. Face Enrolment',
                     style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
-              if (_currentStep != GuidedEnrollmentStep.center)
+              if (isEnrolled)
                 TextButton.icon(
                   icon: const Icon(Icons.restart_alt_rounded, size: 16, color: AppColors.haldiGold),
                   label: const Text('RESET', style: TextStyle(color: AppColors.haldiGold, fontSize: 11, fontWeight: FontWeight.bold)),
-                  onPressed: _resetGuidedEnrollment,
+                  onPressed: _resetFaceEnrollment,
                 ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
-            'Record face from 3 angles (Straight, Left, Right) like phone face lock setup.',
+            'Look straight at the camera to record face feature vector for attendance.',
             style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12),
-          ),
-          const SizedBox(height: 14),
-
-          // Guided 3-Step Progress Indicators Bar
-          Row(
-            children: [
-              Expanded(child: _buildStepProgressPill('1. Straight 😐', _currentStep.index >= 0, _currentStep == GuidedEnrollmentStep.center)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildStepProgressPill('2. Left 👈', _currentStep.index >= 1, _currentStep == GuidedEnrollmentStep.left)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildStepProgressPill('3. Right 👉', _currentStep.index >= 2, _currentStep == GuidedEnrollmentStep.right)),
-            ],
           ),
           const SizedBox(height: 14),
 
@@ -545,8 +505,8 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
               color: AppColors.inputBgDark,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: _currentStep == GuidedEnrollmentStep.completed ? AppColors.pannaEmerald : AppColors.kesariSaffron,
-                width: _currentStep == GuidedEnrollmentStep.completed ? 2.5 : 1.5,
+                color: isEnrolled ? AppColors.pannaEmerald : AppColors.kesariSaffron,
+                width: isEnrolled ? 2.5 : 1.5,
               ),
             ),
             child: ClipRRect(
@@ -568,23 +528,21 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                       ],
                     ),
 
-                  // Overlay Directional Prompt Circle
+                  // Center Alignment Circle
                   Container(
                     width: 150,
                     height: 150,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: _currentStep == GuidedEnrollmentStep.completed
-                            ? AppColors.pannaEmerald
-                            : AppColors.kesariSaffron,
+                        color: isEnrolled ? AppColors.pannaEmerald : AppColors.kesariSaffron,
                         width: 3,
                       ),
                     ),
                     child: Center(
                       child: Text(
-                        _getStepEmoji(),
-                        style: const TextStyle(fontSize: 38),
+                        isEnrolled ? '✓' : '😐',
+                        style: TextStyle(fontSize: 38, color: isEnrolled ? AppColors.pannaEmerald : Colors.white),
                       ),
                     ),
                   ),
@@ -599,19 +557,19 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _currentStep == GuidedEnrollmentStep.completed
+              color: isEnrolled
                   ? AppColors.pannaEmerald.withValues(alpha: 0.15)
                   : AppColors.inputBgDark,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _currentStep == GuidedEnrollmentStep.completed ? AppColors.pannaEmerald : AppColors.cardBorderDark,
+                color: isEnrolled ? AppColors.pannaEmerald : AppColors.cardBorderDark,
               ),
             ),
             child: Row(
               children: [
                 Icon(
-                  _currentStep == GuidedEnrollmentStep.completed ? Icons.verified_rounded : Icons.info_outline_rounded,
-                  color: _currentStep == GuidedEnrollmentStep.completed ? AppColors.pannaEmerald : AppColors.haldiGold,
+                  isEnrolled ? Icons.verified_rounded : Icons.info_outline_rounded,
+                  color: isEnrolled ? AppColors.pannaEmerald : AppColors.haldiGold,
                   size: 18,
                 ),
                 const SizedBox(width: 8),
@@ -619,7 +577,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                   child: Text(
                     _faceStatusMessage,
                     style: GoogleFonts.inter(
-                      color: _currentStep == GuidedEnrollmentStep.completed ? AppColors.pannaEmerald : AppColors.textSecondary,
+                      color: isEnrolled ? AppColors.pannaEmerald : AppColors.textSecondary,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
@@ -636,23 +594,21 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
             height: 46,
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: _currentStep == GuidedEnrollmentStep.completed ? AppColors.haldiGold : AppColors.pannaEmerald,
+                backgroundColor: isEnrolled ? AppColors.haldiGold : AppColors.pannaEmerald,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               icon: _isCapturingFace
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : Icon(_currentStep == GuidedEnrollmentStep.completed ? Icons.refresh_rounded : Icons.camera_alt_rounded, color: Colors.white, size: 20),
+                  : Icon(isEnrolled ? Icons.refresh_rounded : Icons.camera_alt_rounded, color: Colors.white, size: 20),
               label: Text(
                 _isCapturingFace
                     ? 'EXTRACTING VECTOR...'
-                    : (_currentStep == GuidedEnrollmentStep.completed
-                        ? 'RE-ENROLL MULTI-ANGLE FACE'
-                        : 'CAPTURE ${_getStepLabel().toUpperCase()}'),
+                    : (isEnrolled ? 'RE-CAPTURE STRAIGHT FACE' : 'CAPTURE STRAIGHT FACE'),
                 style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
               ),
               onPressed: _isCapturingFace
                   ? null
-                  : (_currentStep == GuidedEnrollmentStep.completed ? _resetGuidedEnrollment : _captureAndEnrollFace),
+                  : (isEnrolled ? _resetFaceEnrollment : _captureAndEnrollFace),
             ),
           ),
         ],
@@ -660,61 +616,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     );
   }
 
-  Widget _buildStepProgressPill(String label, bool isDone, bool isActive) {
-    Color border = AppColors.cardBorderDark;
-    Color bg = AppColors.inputBgDark;
-    Color text = AppColors.textMuted;
 
-    if (isDone) {
-      border = AppColors.pannaEmerald;
-      bg = AppColors.pannaEmerald.withValues(alpha: 0.2);
-      text = AppColors.pannaEmerald;
-    } else if (isActive) {
-      border = AppColors.kesariSaffron;
-      bg = AppColors.kesariSaffron.withValues(alpha: 0.2);
-      text = AppColors.kesariSaffron;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: border),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: text),
-      ),
-    );
-  }
-
-  String _getStepEmoji() {
-    switch (_currentStep) {
-      case GuidedEnrollmentStep.center:
-        return '😐';
-      case GuidedEnrollmentStep.left:
-        return '👈';
-      case GuidedEnrollmentStep.right:
-        return '👉';
-      case GuidedEnrollmentStep.completed:
-        return '✓';
-    }
-  }
-
-  String _getStepLabel() {
-    switch (_currentStep) {
-      case GuidedEnrollmentStep.center:
-        return 'Straight Face';
-      case GuidedEnrollmentStep.left:
-        return 'Left Turn';
-      case GuidedEnrollmentStep.right:
-        return 'Right Turn';
-      case GuidedEnrollmentStep.completed:
-        return 'Complete';
-    }
-  }
 
   Widget _buildInputField(
     TextEditingController controller,
