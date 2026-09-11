@@ -34,14 +34,14 @@
 - [x] Idempotent Firestore set using `attendanceId` UUID key
 
 ## Phase 6: Admin Panel Management & Real Data Integration
-- [ ] 100% Real Firestore Data Binding for Staff Directory CRUD
-- [ ] Daily Attendance Log Table with real-time updates
-- [ ] Payroll & Shift Assignment UI
+- [x] 100% Real Firestore Data Binding for Staff Directory CRUD
+- [x] Daily Attendance Log Table with real-time updates
+- [x] Payroll & Shift Assignment UI
 
 ## Phase 7: Master Panel Provisioning & Role-Based Security
-- [ ] Role authorization enforcement (`MASTER`, `SHOP_ADMIN`, `KIOSK`)
-- [ ] Kiosk Device Pairing with Security PIN (`1234`)
-- [ ] Master Panel Business Approval State Machine (`PENDING` -> `APPROVED` / `REJECTED` -> `ACTIVE` / `PAUSED`)
+- [x] Role authorization enforcement (`MASTER`, `SHOP_ADMIN`, `KIOSK`)
+- [x] Kiosk Device Pairing with Security PIN (`1234`)
+- [x] Master Panel Business Approval State Machine (`PENDING` -> `APPROVED` / `REJECTED` -> `ACTIVE` / `PAUSED`)
 
 ## Phase 8: Leave, Advance Salary & Voice Announcements Engine
 - [ ] Leave request approval workflow & Advance Salary logs

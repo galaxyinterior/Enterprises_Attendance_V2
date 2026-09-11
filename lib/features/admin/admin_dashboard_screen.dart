@@ -27,6 +27,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _selectedNavIndex = 0;
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
+  DateTime _selectedLogDate = DateTime.now();
+  String _selectedStatusFilter = 'ALL';
 
   @override
   void dispose() {
@@ -218,8 +220,64 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
 
           const SizedBox(height: 28),
-          Text('Recent Live Attendance Stream', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Daily Attendance Logs', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _selectedLogDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) setState(() => _selectedLogDate = picked);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.cardDark,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.cardBorderDark),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_month_rounded, color: AppColors.haldiGold, size: 16),
+                      const SizedBox(width: 8),
+                      Text(
+                        DateFormat('dd MMM yyyy').format(_selectedLogDate),
+                        style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
+
+          // Status Filter Chips
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: ['ALL', AppConstants.attendancePresent, AppConstants.attendanceLate, AppConstants.attendanceHalfDay].map((status) {
+                final isSel = _selectedStatusFilter == status;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: ChoiceChip(
+                    label: Text(status, style: TextStyle(color: isSel ? Colors.white : AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold)),
+                    selected: isSel,
+                    selectedColor: AppColors.kesariSaffron,
+                    backgroundColor: AppColors.cardDark,
+                    onSelected: (_) => setState(() => _selectedStatusFilter = status),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 12),
+
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -232,8 +290,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   .collection(AppConstants.colBusinesses)
                   .doc(widget.businessId)
                   .collection(AppConstants.colAttendance)
-                  .orderBy('createdAt', descending: true)
-                  .limit(10)
+                  .where('date', isEqualTo: '${_selectedLogDate.year}-${_selectedLogDate.month.toString().padLeft(2, '0')}-${_selectedLogDate.day.toString().padLeft(2, '0')}')
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -242,26 +299,66 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return Padding(
                     padding: const EdgeInsets.all(16.0),
-                    child: Text('No live attendance records logged yet today.', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                    child: Text('No attendance records logged for ${DateFormat('dd MMMM yyyy').format(_selectedLogDate)}.', style: GoogleFonts.inter(color: AppColors.textMuted)),
                   );
                 }
+
+                var docs = snapshot.data!.docs;
+                if (_selectedStatusFilter != 'ALL') {
+                  docs = docs.where((d) => (d.data() as Map<String, dynamic>)['status'] == _selectedStatusFilter).toList();
+                }
+
+                if (docs.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text('No records matching filter "$_selectedStatusFilter".', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                  );
+                }
+
                 return Column(
-                  children: snapshot.data!.docs.map((doc) {
+                  children: docs.map((doc) {
                     final data = doc.data() as Map<String, dynamic>;
                     final name = data['employeeName'] ?? 'Employee';
                     final status = data['status'] ?? 'PRESENT';
-                    final date = data['date'] ?? '';
+                    final shift = data['shiftId'] ?? 'Morning Shift';
+                    final confidence = (data['confidence'] ?? 0.95).toDouble();
+                    final checkInStr = data['checkInTime'] ?? '';
 
-                    return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: status == 'PRESENT' ? AppColors.pannaEmerald : AppColors.haldiGold,
-                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'E', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    String formattedTime = 'N/A';
+                    if (checkInStr.isNotEmpty) {
+                      try {
+                        formattedTime = DateFormat('hh:mm a').format(DateTime.parse(checkInStr));
+                      } catch (_) {}
+                    }
+
+                    Color statusColor = AppColors.pannaEmerald;
+                    if (status == AppConstants.attendanceLate) statusColor = AppColors.haldiGold;
+                    if (status == AppConstants.attendanceHalfDay) statusColor = AppColors.sindoorRed;
+
+                    return Card(
+                      color: AppColors.bgDark,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: const BorderSide(color: AppColors.cardBorderDark),
                       ),
-                      title: Text(name, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-                      subtitle: Text('Status: $status | Date: $date', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
-                      trailing: Chip(
-                        label: Text(status, style: const TextStyle(color: Colors.white, fontSize: 11)),
-                        backgroundColor: status == 'PRESENT' ? AppColors.pannaEmerald : AppColors.haldiGold,
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: statusColor,
+                          child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'E', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                        title: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(name, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+                            Text(formattedTime, style: GoogleFonts.inter(color: AppColors.haldiGold, fontWeight: FontWeight.bold, fontSize: 13)),
+                          ],
+                        ),
+                        subtitle: Text('Shift: $shift  •  Match Confidence: ${(confidence * 100).toStringAsFixed(1)}%', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 11)),
+                        trailing: Chip(
+                          label: Text(status, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                          backgroundColor: statusColor,
+                        ),
                       ),
                     );
                   }).toList(),
