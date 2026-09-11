@@ -208,6 +208,7 @@ class FaceRecognitionService {
   }) {
     String? bestMatchEmployeeId;
     String? bestMatchName;
+    Map<String, dynamic>? bestMatchEmpData;
     double highestScore = -1.0;
 
     for (var emp in enrolledEmployees) {
@@ -221,6 +222,7 @@ class FaceRecognitionService {
         highestScore = score;
         bestMatchEmployeeId = emp['employeeId'];
         bestMatchName = emp['fullName'];
+        bestMatchEmpData = emp;
       }
     }
 
@@ -229,6 +231,7 @@ class FaceRecognitionService {
         'employeeId': bestMatchEmployeeId,
         'employeeName': bestMatchName,
         'confidence': highestScore,
+        'employeeData': bestMatchEmpData ?? {},
       };
     }
 

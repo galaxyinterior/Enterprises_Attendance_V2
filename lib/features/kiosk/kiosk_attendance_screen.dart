@@ -45,6 +45,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   bool _blinkVerified = false;
   DateTime? _lastBlinkPromptTime;
 
+  Map<String, dynamic>? _lastRecognizedEmployee;
   String _statusMessage = '👁️ Position face inside camera circle to scan';
   String? _lastRecognizedName;
   bool _isShopPaused = false;
@@ -243,6 +244,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         final String empId = match['employeeId'];
         final String name = match['employeeName'];
         final double confidence = match['confidence'];
+        final Map<String, dynamic> empData = match['employeeData'] ?? {};
 
         final now = DateTime.now();
         final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
@@ -252,6 +254,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         if (isDuplicate) {
           await _voiceService.speakAlert('$name, your attendance was already logged recently.');
           setState(() {
+            _lastRecognizedEmployee = empData;
+            _lastRecognizedName = name;
             _statusMessage = '$name — Attendance Already Logged Recently';
           });
         } else {
@@ -283,6 +287,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           await _voiceService.speakCheckInGreeting(name);
 
           setState(() {
+            _lastRecognizedEmployee = empData;
             _lastRecognizedName = name;
             _statusMessage = '✓ Welcome $name! Attendance Marked.';
           });
@@ -290,6 +295,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
       } else {
         await _voiceService.speakAlert('Face not recognized. Please try again.');
         setState(() {
+          _lastRecognizedEmployee = null;
           _statusMessage = 'Face Not Recognized (No Match Found)';
         });
       }
@@ -299,13 +305,14 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         _statusMessage = 'Error scanning face. Retrying...';
       });
     } finally {
-      await Future.delayed(const Duration(seconds: 3));
+      await Future.delayed(const Duration(milliseconds: 4500));
       if (mounted) {
         setState(() {
           _isProcessing = false;
           _faceDetectedInFrame = false;
           _blinkVerified = false;
           _lastRecognizedName = null;
+          _lastRecognizedEmployee = null;
           _statusMessage = '👁️ Position face inside camera circle to scan';
         });
       }
@@ -531,6 +538,90 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                     ],
                   ),
                 ),
+
+                // Recognized Employee Profile Details Banner
+                if (_lastRecognizedEmployee != null || _lastRecognizedName != null) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardDark,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.pannaEmerald, width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.pannaEmerald.withValues(alpha: 0.25),
+                          blurRadius: 20,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const CircleAvatar(
+                              radius: 22,
+                              backgroundColor: AppColors.pannaEmerald,
+                              child: Icon(Icons.person_rounded, color: Colors.white, size: 26),
+                            ),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _lastRecognizedEmployee?['fullName'] ?? _lastRecognizedName ?? 'Employee',
+                                  style: GoogleFonts.outfit(fontSize: 19, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Emp Code: ${_lastRecognizedEmployee?['empCode'] ?? _lastRecognizedEmployee?['employeeId'] ?? 'EMP-01'}  •  Phone: ${_lastRecognizedEmployee?['phone'] ?? _lastRecognizedEmployee?['phoneNumber'] ?? 'N/A'}',
+                                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.haldiGold, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            if (_lastRecognizedEmployee?['department'] != null && _lastRecognizedEmployee!['department'].toString().isNotEmpty)
+                              Chip(
+                                backgroundColor: AppColors.inputBgDark,
+                                side: const BorderSide(color: AppColors.cardBorderDark),
+                                avatar: const Icon(Icons.business_outlined, size: 14, color: AppColors.haldiGold),
+                                label: Text(_lastRecognizedEmployee!['department'].toString(), style: const TextStyle(fontSize: 11, color: AppColors.textPrimary)),
+                                padding: EdgeInsets.zero,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            if (_lastRecognizedEmployee?['designation'] != null && _lastRecognizedEmployee!['designation'].toString().isNotEmpty)
+                              Chip(
+                                backgroundColor: AppColors.inputBgDark,
+                                side: const BorderSide(color: AppColors.cardBorderDark),
+                                avatar: const Icon(Icons.work_outline, size: 14, color: AppColors.haldiGold),
+                                label: Text(_lastRecognizedEmployee!['designation'].toString(), style: const TextStyle(fontSize: 11, color: AppColors.textPrimary)),
+                                padding: EdgeInsets.zero,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            Chip(
+                              backgroundColor: AppColors.pannaEmerald.withValues(alpha: 0.2),
+                              side: const BorderSide(color: AppColors.pannaEmerald),
+                              avatar: const Icon(Icons.check_circle_rounded, size: 14, color: AppColors.pannaEmerald),
+                              label: const Text('PRESENT TODAY', style: TextStyle(fontSize: 11, color: AppColors.pannaEmerald, fontWeight: FontWeight.bold)),
+                              padding: EdgeInsets.zero,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
