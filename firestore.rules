@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions for Security & Tenant Isolation
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isMaster() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'MASTER' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'MASTER'
+      );
+    }
+    
+    function isBusinessAdmin(businessId) {
+      return isAuthenticated() && (
+        isMaster() ||
+        (
+          request.auth.token.businessId == businessId &&
+          (request.auth.token.role == 'ADMIN' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
+        )
+      );
+    }
+    
+    function isBusinessMember(businessId) {
+      return isAuthenticated() && (
+        isMaster() ||
+        request.auth.token.businessId == businessId ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
+      );
+    }
+
+    // Public registration requests (created on application submission, processed by Master)
+    match /registrationrequests/{requestId} {
+      allow create: if true;
+      allow read, update, delete: if isMaster();
+    }
+
+    // Businesses collection & Tenant isolation
+    match /businesses/{businessId} {
+      allow read: if isBusinessMember(businessId);
+      allow write: if isMaster();
+      
+      // Employees subcollection
+      match /employees/{employeeId} {
+        allow read: if isBusinessMember(businessId);
+        allow write: if isBusinessAdmin(businessId);
+      }
+      
+      // Attendance logs subcollection
+      match /attendance/{attendanceId} {
+        allow read: if isBusinessMember(businessId);
+        allow create: if isBusinessMember(businessId);
+        allow update, delete: if isBusinessAdmin(businessId);
+      }
+    }
+    
+    // Top-level stores/employees/attendance_logs collections (for cross-compatible access)
+    match /stores/{storeId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /employees/{employeeId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /attendance_logs/{logId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    // User role mappings
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isMaster());
+      allow write: if isMaster();
+    }
+  }
+}

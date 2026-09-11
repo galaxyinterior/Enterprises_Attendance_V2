@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import '../constants/app_constants.dart';
 import 'offline_db_service.dart';
 
@@ -42,7 +43,7 @@ class SyncEngine {
         if (bizDoc.exists) {
           final bizData = bizDoc.data()!;
           if (bizData['status'] == AppConstants.statusPaused) {
-            print('Business ${record.businessId} is PAUSED. Sync postponed.');
+            debugPrint('Business ${record.businessId} is PAUSED. Sync postponed.');
             continue;
           }
         }
@@ -60,7 +61,7 @@ class SyncEngine {
         syncedCount++;
       }
     } catch (e) {
-      print('Sync error: $e');
+      debugPrint('Sync error: $e');
     } finally {
       _isSyncing = false;
     }
