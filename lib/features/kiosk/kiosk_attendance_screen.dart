@@ -126,39 +126,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
       }
 
       // Face is detected in camera!
-      final bool isLiveValid = res['isLiveValid'] ?? true;
-      final bool isBlinking = res['isBlinking'] ?? false;
-
-      if (!isLiveValid) {
-        if (mounted) {
-          setState(() {
-            _statusMessage = 'Look straight at camera';
-          });
-        }
-        return;
-      }
-
       if (!_faceDetectedInFrame) {
         if (mounted) {
           setState(() {
             _faceDetectedInFrame = true;
-            _statusMessage = '👁️ Face Detected — Please Blink Your Eyes!';
+            _statusMessage = '👁️ Face Detected — Matching & Verifying...';
           });
         }
       }
 
-      // Speak eye-blink prompt every 4.5 seconds if eye blink pending
-      final now = DateTime.now();
-      if (_lastBlinkPromptTime == null || now.difference(_lastBlinkPromptTime!).inSeconds > 4) {
-        _lastBlinkPromptTime = now;
-        _voiceService.speakBlinkPrompt();
-      }
-
-      // Trigger attendance when eye blink detected OR automatically after face verification
-      if (isBlinking || _blinkVerified || isLiveValid) {
-        _blinkVerified = true;
-        await _processFaceScanWithFile(xFile.path, bytes);
-      }
+      // Trigger attendance scan immediately when face detected
+      await _processFaceScanWithFile(xFile.path, bytes);
     } catch (e) {
       debugPrint('Auto check frame error: $e');
     }
@@ -200,18 +178,14 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = '✓ Blink Verified! Matching face vector...';
+      _statusMessage = '✓ Face Verified! Matching database...';
     });
 
     try {
       List<double>? targetVector = await _faceService.processFaceFromBytes(bytes, tempPath);
 
-      if (targetVector == null) {
-        await _voiceService.speakAlert('Face position unclear or quality low. Look directly at camera.');
-        setState(() {
-          _statusMessage = 'Face Quality Low — Look Frontal';
-        });
-        await Future.delayed(const Duration(seconds: 2));
+      if (targetVector == null || targetVector.isEmpty) {
+        debugPrint('Face vector extraction returned empty, skipping frame...');
         return;
       }
 

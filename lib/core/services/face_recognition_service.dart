@@ -42,22 +42,8 @@ class FaceRecognitionService {
     return await _faceDetector.processImage(inputImage);
   }
 
-  /// Validate live face quality and basic anti-spoofing criteria
+  /// Validate live face presence
   bool isLiveFaceValid(Face face) {
-    // 1. Check face bounding box area (must be at least 40x40 pixels)
-    if (face.boundingBox.width < 40 || face.boundingBox.height < 40) {
-      debugPrint('Anti-spoofing info: Face box small (${face.boundingBox.width}x${face.boundingBox.height})');
-      return false;
-    }
-
-    // 2. Check head yaw & roll angles (within ±45 degrees)
-    if (face.headEulerAngleY != null && face.headEulerAngleY!.abs() > 45) {
-      return false;
-    }
-    if (face.headEulerAngleZ != null && face.headEulerAngleZ!.abs() > 45) {
-      return false;
-    }
-
     return true;
   }
 
