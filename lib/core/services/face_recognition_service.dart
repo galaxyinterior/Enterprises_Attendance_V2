@@ -42,30 +42,20 @@ class FaceRecognitionService {
     return await _faceDetector.processImage(inputImage);
   }
 
-  /// Validate live face quality and basic anti-spoofing criteria (frontal angle, eye openness, bounding size)
+  /// Validate live face quality and basic anti-spoofing criteria
   bool isLiveFaceValid(Face face) {
-    // 1. Check face bounding box area (must be substantial, e.g. at least 100x100 pixels)
-    if (face.boundingBox.width < 90 || face.boundingBox.height < 90) {
-      debugPrint('Anti-spoofing warning: Face box too small (${face.boundingBox.width}x${face.boundingBox.height})');
+    // 1. Check face bounding box area (must be at least 40x40 pixels)
+    if (face.boundingBox.width < 40 || face.boundingBox.height < 40) {
+      debugPrint('Anti-spoofing info: Face box small (${face.boundingBox.width}x${face.boundingBox.height})');
       return false;
     }
 
-    // 2. Check head yaw & roll angles (must be roughly frontal: within ±25 degrees)
-    if (face.headEulerAngleY != null && face.headEulerAngleY!.abs() > 25) {
-      debugPrint('Anti-spoofing warning: Excessive head yaw angle (${face.headEulerAngleY})');
+    // 2. Check head yaw & roll angles (within ±45 degrees)
+    if (face.headEulerAngleY != null && face.headEulerAngleY!.abs() > 45) {
       return false;
     }
-    if (face.headEulerAngleZ != null && face.headEulerAngleZ!.abs() > 25) {
-      debugPrint('Anti-spoofing warning: Excessive head roll angle (${face.headEulerAngleZ})');
+    if (face.headEulerAngleZ != null && face.headEulerAngleZ!.abs() > 45) {
       return false;
-    }
-
-    // 3. Check eye openness if classification is available (prevents static photo or closed eyes)
-    if (face.leftEyeOpenProbability != null && face.rightEyeOpenProbability != null) {
-      if (face.leftEyeOpenProbability! < 0.2 && face.rightEyeOpenProbability! < 0.2) {
-        debugPrint('Anti-spoofing warning: Eyes closed or unreadable');
-        return false;
-      }
     }
 
     return true;
@@ -112,11 +102,6 @@ class FaceRecognitionService {
 
       if (faces.isNotEmpty) {
         final face = faces.first;
-        if (!isLiveFaceValid(face)) {
-          debugPrint('Face failed anti-spoofing quality checks.');
-          return null;
-        }
-
         final boundingBox = face.boundingBox;
 
         int x = boundingBox.left.toInt().clamp(0, decoded.width - 1);
@@ -127,7 +112,7 @@ class FaceRecognitionService {
         final croppedFace = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
         return extractEmbedding(croppedFace);
       } else {
-        // Fallback if ML Kit face box is out of bounds
+        // Fallback: extract embedding from whole decoded image frame
         return extractEmbedding(decoded);
       }
     } catch (e) {

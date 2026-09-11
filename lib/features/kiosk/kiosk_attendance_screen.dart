@@ -220,16 +220,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           .collection(AppConstants.colBusinesses)
           .doc(widget.businessId)
           .collection(AppConstants.colEmployees)
-          .where('active', isEqualTo: true)
-          .where('faceEnrollmentStatus', isEqualTo: true)
           .get();
 
-      final List<Map<String, dynamic>> enrolled = snapshot.docs.map((doc) => doc.data()).toList();
+      final List<Map<String, dynamic>> enrolled = snapshot.docs
+          .map((doc) => doc.data())
+          .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+          .toList();
 
       if (enrolled.isEmpty) {
-        await _voiceService.speakAlert('No enrolled staff found for this business.');
+        await _voiceService.speakAlert('No enrolled staff with face vectors in database.');
         setState(() {
-          _statusMessage = 'No Enrolled Staff in Database';
+          _statusMessage = '⚠️ No Staff Face Data in Database (Add Staff in Admin Panel)';
         });
         await Future.delayed(const Duration(seconds: 2));
         return;
