@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 import '../constants/app_constants.dart';
 import '../../models/business_model.dart';
 
@@ -29,25 +30,46 @@ class AuthRoutingService {
     await prefs.setString(keyShopId, shopId);
     await prefs.setString(keyBusinessId, businessId);
     await prefs.setString(keyEmail, email);
+    debugPrint('Session saved successfully: role=$role, shopId=$shopId');
   }
 
   // Retrieve saved local session
   Future<Map<String, dynamic>?> getSavedSession() async {
     final prefs = await SharedPreferences.getInstance();
     final isLoggedIn = prefs.getBool(keyIsLoggedIn) ?? false;
-    if (!isLoggedIn) return null;
+    final firebaseUser = _auth.currentUser;
 
-    final role = prefs.getString(keyRole) ?? '';
-    final shopId = prefs.getString(keyShopId) ?? '';
-    final businessId = prefs.getString(keyBusinessId) ?? '';
-    final email = prefs.getString(keyEmail) ?? '';
+    // Restore if SharedPreferences flag is true OR Firebase user exists
+    if (!isLoggedIn && firebaseUser == null) return null;
+
+    String role = prefs.getString(keyRole) ?? '';
+    String shopId = prefs.getString(keyShopId) ?? '';
+    String businessId = prefs.getString(keyBusinessId) ?? '';
+    String email = prefs.getString(keyEmail) ?? firebaseUser?.email ?? '';
+
+    // If SharedPreferences role is empty, infer from Firebase email format
+    if (role.isEmpty && email.isNotEmpty) {
+      if (email.endsWith('@kiosk.in')) {
+        role = AppConstants.roleKiosk;
+        shopId = email.split('@').first.toUpperCase();
+        businessId = shopId;
+      } else if (email.endsWith('@admin.in')) {
+        role = AppConstants.roleShopAdmin;
+        shopId = email.split('@').first.toUpperCase();
+        businessId = shopId;
+      } else if (email == 'master@admin.com') {
+        role = AppConstants.roleMaster;
+        shopId = 'MASTER';
+        businessId = 'MASTER';
+      }
+    }
 
     if (role.isEmpty) return null;
 
     return {
       'role': role,
-      'shopId': shopId,
-      'businessId': businessId,
+      'shopId': shopId.isNotEmpty ? shopId : 'SHOP001',
+      'businessId': businessId.isNotEmpty ? businessId : (shopId.isNotEmpty ? shopId : 'SHOP001'),
       'email': email,
     };
   }
@@ -57,6 +79,7 @@ class AuthRoutingService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     await _auth.signOut();
+    debugPrint('Session cleared on explicit logout.');
   }
 
   // Login user and fetch role & business info
@@ -65,8 +88,9 @@ class AuthRoutingService {
     required String password,
   }) async {
     try {
+      final cleanEmail = email.trim();
       UserCredential credential = await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
+        email: cleanEmail,
         password: password,
       );
 
@@ -81,11 +105,11 @@ class AuthRoutingService {
         final businessId = data['businessId'] ?? '';
 
         if (role == AppConstants.roleMaster) {
-          await saveSession(role: AppConstants.roleMaster, shopId: 'MASTER', businessId: 'MASTER', email: email);
+          await saveSession(role: AppConstants.roleMaster, shopId: 'MASTER', businessId: 'MASTER', email: cleanEmail);
           return {
             'role': AppConstants.roleMaster,
             'uid': uid,
-            'email': email,
+            'email': cleanEmail,
           };
         }
 
@@ -98,11 +122,11 @@ class AuthRoutingService {
 
           if (bizDoc.exists) {
             final bizModel = BusinessModel.fromMap(bizDoc.data()!);
-            await saveSession(role: role, shopId: bizModel.shopId, businessId: businessId, email: email);
+            await saveSession(role: role, shopId: bizModel.shopId, businessId: businessId, email: cleanEmail);
             return {
               'role': role,
               'uid': uid,
-              'email': email,
+              'email': cleanEmail,
               'businessId': businessId,
               'shopId': bizModel.shopId,
               'business': bizModel,
@@ -110,51 +134,51 @@ class AuthRoutingService {
           }
         }
 
-        await saveSession(role: role, shopId: businessId, businessId: businessId, email: email);
+        await saveSession(role: role, shopId: businessId, businessId: businessId, email: cleanEmail);
         return {
           'role': role,
           'uid': uid,
-          'email': email,
+          'email': cleanEmail,
           'businessId': businessId,
           'shopId': businessId,
         };
       } else {
         // Check if email format identifies Kiosk or Admin fallback
-        if (email.endsWith('@kiosk.in')) {
-          String shopId = email.split('@').first.toUpperCase();
-          await saveSession(role: AppConstants.roleKiosk, shopId: shopId, businessId: shopId, email: email);
+        if (cleanEmail.endsWith('@kiosk.in')) {
+          String shopId = cleanEmail.split('@').first.toUpperCase();
+          await saveSession(role: AppConstants.roleKiosk, shopId: shopId, businessId: shopId, email: cleanEmail);
           return {
             'role': AppConstants.roleKiosk,
             'uid': uid,
-            'email': email,
+            'email': cleanEmail,
             'shopId': shopId,
             'businessId': shopId,
           };
-        } else if (email.endsWith('@admin.in')) {
-          String shopId = email.split('@').first.toUpperCase();
-          await saveSession(role: AppConstants.roleShopAdmin, shopId: shopId, businessId: shopId, email: email);
+        } else if (cleanEmail.endsWith('@admin.in')) {
+          String shopId = cleanEmail.split('@').first.toUpperCase();
+          await saveSession(role: AppConstants.roleShopAdmin, shopId: shopId, businessId: shopId, email: cleanEmail);
           return {
             'role': AppConstants.roleShopAdmin,
             'uid': uid,
-            'email': email,
+            'email': cleanEmail,
             'shopId': shopId,
             'businessId': shopId,
           };
-        } else if (email == 'master@admin.com') {
-          await saveSession(role: AppConstants.roleMaster, shopId: 'MASTER', businessId: 'MASTER', email: email);
+        } else if (cleanEmail == 'master@admin.com') {
+          await saveSession(role: AppConstants.roleMaster, shopId: 'MASTER', businessId: 'MASTER', email: cleanEmail);
           return {
             'role': AppConstants.roleMaster,
             'uid': uid,
-            'email': email,
+            'email': cleanEmail,
           };
         }
       }
 
-      await saveSession(role: AppConstants.roleShopAdmin, shopId: 'SHOP001', businessId: 'SHOP001', email: email);
+      await saveSession(role: AppConstants.roleShopAdmin, shopId: 'SHOP001', businessId: 'SHOP001', email: cleanEmail);
       return {
         'role': AppConstants.roleShopAdmin,
         'uid': uid,
-        'email': email,
+        'email': cleanEmail,
         'shopId': 'SHOP001',
         'businessId': 'SHOP001',
       };
