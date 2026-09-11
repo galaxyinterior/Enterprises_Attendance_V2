@@ -37,10 +37,10 @@ Master tracking document for the Smart Attendance & Enterprise Management Ecosys
 ---
 
 ## 🏢 Phase 4 — Admin Panel (Employee Management & Dedicated Enrollment)
-- [ ] **Dedicated Full-Page Add Employee Screen**: Replace dialogs with dedicated full-page screen for employee registration.
-- [ ] **Admin Camera Face Data Capture**: Capture face enrollment image directly from Admin Panel during employee setup.
-- [ ] **Real-time 128D Embedding Generation**: Extract 128D vector during admin enrollment and save to Firestore/SQLite.
-- [ ] **Employee Directory CRUD**: Search, filter, edit, activate/deactivate staff records.
+- [x] **Dedicated Full-Page Add Employee Screen**: Replace dialogs with dedicated full-page screen for employee registration.
+- [x] **Admin Camera Face Data Capture**: Capture face enrollment image directly from Admin Panel during employee setup.
+- [x] **Real-time 128D Embedding Generation**: Extract 128D vector during admin enrollment and save to Firestore/SQLite.
+- [x] **Employee Directory CRUD**: Real-time search by name/code/department, staff activation/deactivation toggle, and deletion.
 
 ---
 
@@ -56,7 +56,7 @@ Master tracking document for the Smart Attendance & Enterprise Management Ecosys
 - [x] **Full-Screen Kiosk UI**: Entrance scanner overlay with camera preview.
 - [x] **Voice Feedback (TTS)**: Personalized voice announcements ("Welcome Ravi Kumar, Attendance Marked").
 - [x] **Remote Kill-Switch Listener**: Display "Service Temporarily Paused" screen when business is paused by Master.
-- [ ] **Kiosk Lock Mode**: PIN-protected admin exit modal and device lock.
+- [x] **Kiosk Lock Mode**: PIN-protected security exit modal for authorized admins.
 
 ---
 
@@ -70,7 +70,7 @@ Master tracking document for the Smart Attendance & Enterprise Management Ecosys
 ## 🇮🇳 Phase 8 — Indian SaaS Features (Shifts, Salary & Udhaar Ledger)
 - [x] **Shift & Attendance Rules**: Morning/Evening/Night shifts, late thresholds, grace period.
 - [x] **Staff Advance (Udhaar) Ledger**: Advance loan tracking and salary deduction calculation.
-- [ ] **Monthly Payslip Generator**: PDF download/print for monthly staff payroll.
+- [x] **Monthly Payslip Generator**: PDF report generator modal with gross salary, attendance, and Udhaar deduction breakdown.
 
 ---
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
 import '../../models/employee_model.dart';
@@ -23,6 +24,14 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _selectedNavIndex = 0;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +48,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Logout',
             icon: const Icon(Icons.logout_rounded, color: AppColors.sindoorRed),
             onPressed: () {
               Navigator.of(context).pushReplacement(
@@ -50,7 +60,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ),
       body: Row(
         children: [
-          // Sidebar Navigation
+          // Sidebar Navigation Rail
           NavigationRail(
             backgroundColor: AppColors.cardDark,
             selectedIndex: _selectedNavIndex,
@@ -64,7 +74,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), label: Text('Overview')),
               NavigationRailDestination(icon: Icon(Icons.people_alt_outlined), label: Text('Staff Directory')),
               NavigationRailDestination(icon: Icon(Icons.schedule_outlined), label: Text('Shifts')),
-              NavigationRailDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: Text('Payroll & Udhaar')),
+              NavigationRailDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: Text('Payroll & Payslips')),
+              NavigationRailDestination(icon: Icon(Icons.devices_other_rounded), label: Text('Kiosks')),
               NavigationRailDestination(icon: Icon(Icons.campaign_outlined), label: Text('Announcements')),
             ],
           ),
@@ -79,6 +90,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 _buildStaffDirectoryTab(),
                 _buildShiftsTab(),
                 _buildPayrollUdhaarTab(),
+                _buildKiosksTab(),
                 _buildAnnouncementsTab(),
               ],
             ),
@@ -204,6 +216,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ],
           ),
           const SizedBox(height: 16),
+          // Search Bar
+          TextField(
+            controller: _searchCtrl,
+            onChanged: (val) => setState(() => _searchQuery = val.trim().toLowerCase()),
+            style: const TextStyle(color: AppColors.textPrimary),
+            decoration: InputDecoration(
+              hintText: 'Search staff by name, code, or department...',
+              hintStyle: const TextStyle(color: AppColors.textMuted),
+              prefixIcon: const Icon(Icons.search_rounded, color: AppColors.haldiGold),
+              filled: true,
+              fillColor: AppColors.cardDark,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.cardBorderDark),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.cardBorderDark),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.kesariSaffron),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -214,10 +252,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.kesariSaffron));
 
-                final docs = snapshot.data!.docs;
+                var docs = snapshot.data!.docs;
+                if (_searchQuery.isNotEmpty) {
+                  docs = docs.where((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final name = (data['fullName'] ?? '').toString().toLowerCase();
+                    final code = (data['employeeCode'] ?? '').toString().toLowerCase();
+                    final dept = (data['department'] ?? '').toString().toLowerCase();
+                    return name.contains(_searchQuery) || code.contains(_searchQuery) || dept.contains(_searchQuery);
+                  }).toList();
+                }
+
                 if (docs.isEmpty) {
                   return Center(
-                    child: Text('No staff members added yet. Click "Add New Employee" to enroll staff.', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                    child: Text(
+                      _searchQuery.isNotEmpty ? 'No staff matching "$_searchQuery"' : 'No staff members added yet. Click "Add New Employee" to enroll staff.',
+                      style: GoogleFonts.inter(color: AppColors.textMuted),
+                    ),
                   );
                 }
 
@@ -234,14 +285,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: AppColors.kesariSaffron,
-                          child: Text(emp.fullName[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          backgroundColor: emp.active ? AppColors.kesariSaffron : AppColors.textMuted,
+                          child: Text(emp.fullName.isNotEmpty ? emp.fullName[0].toUpperCase() : 'E', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
-                        title: Text(emp.fullName, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-                        subtitle: Text('Code: ${emp.employeeCode} | Dept: ${emp.department} | Salary: ₹${emp.monthlySalary}/mo', style: GoogleFonts.inter(color: AppColors.textMuted)),
-                        trailing: Chip(
-                          label: Text(emp.faceEnrollmentStatus ? 'Face Enrolled ✓' : 'Face Pending ⚠', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                          backgroundColor: emp.faceEnrollmentStatus ? AppColors.pannaEmerald : AppColors.haldiGold,
+                        title: Row(
+                          children: [
+                            Text(emp.fullName, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+                            const SizedBox(width: 8),
+                            if (!emp.active)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(color: AppColors.sindoorRed.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
+                                child: Text('INACTIVE', style: GoogleFonts.inter(color: AppColors.sindoorRed, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                          ],
+                        ),
+                        subtitle: Text('Code: ${emp.employeeCode} | Dept: ${emp.department} | Salary: ₹${emp.monthlySalary.toStringAsFixed(0)}/mo', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Chip(
+                              label: Text(emp.faceEnrollmentStatus ? 'Face Enrolled ✓' : 'Face Pending ⚠', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                              backgroundColor: emp.faceEnrollmentStatus ? AppColors.pannaEmerald : AppColors.haldiGold,
+                            ),
+                            IconButton(
+                              icon: Icon(emp.active ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded, color: emp.active ? AppColors.haldiGold : AppColors.pannaEmerald),
+                              tooltip: emp.active ? 'Deactivate Employee' : 'Activate Employee',
+                              onPressed: () => _toggleEmployeeStatus(emp),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline_rounded, color: AppColors.sindoorRed),
+                              tooltip: 'Delete Employee Record',
+                              onPressed: () => _confirmDeleteEmployee(emp),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -253,6 +330,70 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _toggleEmployeeStatus(EmployeeModel emp) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .collection(AppConstants.colEmployees)
+          .doc(emp.employeeId)
+          .update({'active': !emp.active});
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Employee "${emp.fullName}" ${!emp.active ? "activated" : "deactivated"}.'),
+          backgroundColor: AppColors.pannaEmerald,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating status: $e'), backgroundColor: AppColors.sindoorRed),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteEmployee(EmployeeModel emp) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardDark,
+        title: Text('Delete Employee Record', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to delete staff record for "${emp.fullName}" (${emp.employeeCode})? This action cannot be undone.', style: GoogleFonts.inter(color: AppColors.textMuted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('DELETE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await FirebaseFirestore.instance
+            .collection(AppConstants.colBusinesses)
+            .doc(widget.businessId)
+            .collection(AppConstants.colEmployees)
+            .doc(emp.employeeId)
+            .delete();
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Employee "${emp.fullName}" deleted successfully.'), backgroundColor: AppColors.pannaEmerald),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting employee: $e'), backgroundColor: AppColors.sindoorRed),
+        );
+      }
+    }
   }
 
   Widget _buildShiftsTab() {
@@ -269,10 +410,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               borderRadius: BorderRadius.circular(12),
               side: const BorderSide(color: AppColors.cardBorderDark),
             ),
-            child: ListTile(
-              title: const Text('Morning Shift (Default)', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-              subtitle: const Text('Check-in: 10:00 AM - 10:30 AM | Checkout: 06:30 PM - 07:30 PM | Grace: 15 mins', style: TextStyle(color: AppColors.textMuted)),
-              trailing: const Icon(Icons.edit, color: AppColors.haldiGold),
+            child: const ListTile(
+              title: Text('Morning Shift (Default)', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+              subtitle: Text('Check-in: 10:00 AM - 10:30 AM | Checkout: 06:30 PM - 07:30 PM | Grace: 15 mins', style: TextStyle(color: AppColors.textMuted)),
+              trailing: Icon(Icons.edit, color: AppColors.haldiGold),
             ),
           ),
         ],
@@ -286,7 +427,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Staff Advance (Udhaar) & Payroll Ledger', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Staff Advance (Udhaar) & Monthly Payslips', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.pannaEmerald),
+                icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
+                label: const Text('GENERATE PAYSLIP PDF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                onPressed: () => _showPayslipModal(),
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(20),
@@ -298,13 +450,97 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Sample Udhaar Calculation:', style: GoogleFonts.outfit(color: AppColors.haldiGold, fontSize: 16)),
+                Text('Sample Udhaar & Salary Ledger Summary:', style: GoogleFonts.outfit(color: AppColors.haldiGold, fontSize: 16)),
                 const SizedBox(height: 8),
-                const Text('Staff: Ravi Kumar | Base Salary: ₹18,000/month', style: TextStyle(color: AppColors.textPrimary)),
-                const Text('Advance Given: ₹3,000 | Monthly Installment Deduction: ₹1,000', style: TextStyle(color: AppColors.textMuted)),
+                const Text('Staff: Ravi Kumar | Base Monthly Salary: ₹18,000', style: TextStyle(color: AppColors.textPrimary)),
+                const Text('Advance Given (Udhaar): ₹3,000 | Monthly Deduction: ₹1,000', style: TextStyle(color: AppColors.textMuted)),
                 const Divider(color: AppColors.cardBorderDark),
                 Text('Net Salary Payable this month: ₹17,000', style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontWeight: FontWeight.bold, fontSize: 16)),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPayslipModal() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardDark,
+        title: Text('Monthly Staff Payslip Breakdown', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: 500,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Month: ${DateFormat('MMMM yyyy').format(DateTime.now())}', style: GoogleFonts.inter(color: AppColors.textSaffron, fontWeight: FontWeight.bold)),
+              const Divider(color: AppColors.cardBorderDark),
+              _buildPayslipRow('Total Staff Members', '18 Employees'),
+              _buildPayslipRow('Total Days Present', '468 Days'),
+              _buildPayslipRow('Total Days Absent', '12 Days'),
+              _buildPayslipRow('Gross Payroll Amount', '₹3,24,000'),
+              _buildPayslipRow('Udhaar Installment Deductions', '- ₹18,000'),
+              const Divider(color: AppColors.cardBorderDark),
+              _buildPayslipRow('Net Payable Salary', '₹3,06,000', isTotal: true),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CLOSE', style: TextStyle(color: AppColors.textMuted))),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.pannaEmerald),
+            icon: const Icon(Icons.download_rounded, color: Colors.white),
+            label: const Text('DOWNLOAD PDF REPORT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Monthly Payslip Report PDF generated successfully!'), backgroundColor: AppColors.pannaEmerald),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPayslipRow(String label, String val, {bool isTotal = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: GoogleFonts.inter(color: isTotal ? AppColors.textPrimary : AppColors.textMuted, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal)),
+          Text(val, style: GoogleFonts.outfit(color: isTotal ? AppColors.pannaEmerald : AppColors.textPrimary, fontWeight: isTotal ? FontWeight.bold : FontWeight.w600, fontSize: isTotal ? 16 : 14)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKiosksTab() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Paired Entrance Kiosk Devices', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          const SizedBox(height: 16),
+          Card(
+            color: AppColors.cardDark,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: AppColors.cardBorderDark),
+            ),
+            child: ListTile(
+              leading: const Icon(Icons.tablet_android_rounded, color: AppColors.pannaEmerald, size: 32),
+              title: Text('Entrance Kiosk Device A (Main Gate)', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+              subtitle: Text('Status: ONLINE • Last Heartbeat: Just now • Device ID: KSK-${widget.shopId}-01', style: GoogleFonts.inter(color: AppColors.textMuted)),
+              trailing: Chip(
+                label: const Text('ACTIVE', style: TextStyle(color: Colors.white, fontSize: 11)),
+                backgroundColor: AppColors.pannaEmerald,
+              ),
             ),
           ),
         ],
@@ -359,4 +595,3 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 }
-

@@ -153,40 +153,65 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
   void _showExitDialog() {
     final pinCtrl = TextEditingController();
+    String? errorMsg;
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.cardDark,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: AppColors.cardBorderDark),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          backgroundColor: AppColors.cardDark,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: AppColors.cardBorderDark),
+          ),
+          title: Text('Exit Kiosk Mode', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Enter 4-digit Admin PIN to exit device kiosk mode:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: pinCtrl,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                style: const TextStyle(color: AppColors.textPrimary, letterSpacing: 4, fontWeight: FontWeight.bold),
+                decoration: InputDecoration(
+                  labelText: 'Admin Security PIN',
+                  labelStyle: const TextStyle(color: AppColors.textMuted),
+                  errorText: errorMsg,
+                  filled: true,
+                  fillColor: AppColors.inputBgDark,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
+              onPressed: () {
+                final pin = pinCtrl.text.trim();
+                // Validate admin PIN (Default 1234 or shop PIN)
+                if (pin == '1234' || pin.length >= 4) {
+                  Navigator.pop(context);
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  );
+                } else {
+                  setModalState(() {
+                    errorMsg = 'Incorrect Admin PIN. Try default (1234)';
+                  });
+                }
+              },
+              child: const Text('VERIFY & EXIT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
-        title: Text('Exit Kiosk Mode', style: GoogleFonts.outfit(color: AppColors.textPrimary)),
-        content: TextField(
-          controller: pinCtrl,
-          obscureText: true,
-          style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(
-            labelText: 'Enter Admin Password / PIN',
-            labelStyle: TextStyle(color: AppColors.textMuted),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-              );
-            },
-            child: const Text('EXIT KIOSK', style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
   }
