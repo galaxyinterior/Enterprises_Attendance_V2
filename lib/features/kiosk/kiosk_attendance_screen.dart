@@ -43,6 +43,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   bool _isProcessing = false;
   bool _faceDetectedInFrame = false;
 
+  List<Map<String, dynamic>> _enrolledStaffCache = [];
   Map<String, dynamic>? _lastRecognizedEmployee;
   String _statusMessage = '👁️ Position face inside camera circle to scan';
   String? _lastRecognizedName;
@@ -54,11 +55,31 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     super.initState();
     _initServicesAndCamera();
     _listenToShopStatus();
+    _listenToEnrolledStaff();
     _heartbeatService.startHeartbeat(
       businessId: widget.businessId,
       shopId: widget.shopId,
       deviceId: _deviceId,
     );
+  }
+
+  void _listenToEnrolledStaff() {
+    FirebaseFirestore.instance
+        .collection(AppConstants.colBusinesses)
+        .doc(widget.businessId)
+        .collection(AppConstants.colEmployees)
+        .snapshots()
+        .listen((snapshot) {
+      final enrolled = snapshot.docs
+          .map((doc) => doc.data())
+          .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+          .toList();
+      if (mounted) {
+        setState(() {
+          _enrolledStaffCache = enrolled;
+        });
+      }
+    });
   }
 
   Future<void> _initServicesAndCamera() async {
@@ -75,7 +96,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
         _cameraController = CameraController(
           frontCam,
-          ResolutionPreset.medium,
+          ResolutionPreset.low,
           enableAudio: false,
         );
 
@@ -186,19 +207,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         return;
       }
 
-      // Fetch real enrolled staff exclusively from Firestore
-      final snapshot = await FirebaseFirestore.instance
-          .collection(AppConstants.colBusinesses)
-          .doc(widget.businessId)
-          .collection(AppConstants.colEmployees)
-          .get();
-
-      final List<Map<String, dynamic>> enrolled = snapshot.docs
-          .map((doc) => doc.data())
-          .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
-          .toList();
-
-      if (enrolled.isEmpty) {
+      if (_enrolledStaffCache.isEmpty) {
         await _voiceService.speakAlert('No enrolled staff with face vectors in database.');
         setState(() {
           _statusMessage = '⚠️ No Staff Face Data in Database (Add Staff in Admin Panel)';
@@ -207,9 +216,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         return;
       }
 
+      // Perform instant memory cosine similarity match
       final match = _faceService.matchFace(
         targetEmbedding: targetVector,
-        enrolledEmployees: enrolled,
+        enrolledEmployees: _enrolledStaffCache,
       );
 
       if (match != null) {
