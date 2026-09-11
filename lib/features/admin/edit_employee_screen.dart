@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:uuid/uuid.dart';
 import 'package:camera/camera.dart';
 import 'package:intl/intl.dart';
 
@@ -12,36 +11,43 @@ import '../../core/services/face_recognition_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../models/employee_model.dart';
 
-enum GuidedEnrollmentStep { center, left, right, completed }
+enum GuidedEnrollmentStep {
+  center,
+  left,
+  right,
+  completed,
+}
 
-class AddEmployeeScreen extends StatefulWidget {
+class EditEmployeeScreen extends StatefulWidget {
   final String businessId;
   final String shopId;
+  final EmployeeModel employee;
 
-  const AddEmployeeScreen({
+  const EditEmployeeScreen({
     super.key,
     required this.businessId,
     required this.shopId,
+    required this.employee,
   });
 
   @override
-  State<AddEmployeeScreen> createState() => _AddEmployeeScreenState();
+  State<EditEmployeeScreen> createState() => _EditEmployeeScreenState();
 }
 
-class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
+class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
   final _formKey = GlobalKey<FormState>();
 
   // Text Controllers
-  final _fullNameCtrl = TextEditingController();
-  final _empCodeCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();
-  final _departmentCtrl = TextEditingController(text: 'Sales');
-  final _designationCtrl = TextEditingController(text: 'Staff');
-  final _salaryCtrl = TextEditingController(text: '18000');
-  DateTime _joiningDate = DateTime.now();
-  String _selectedShift = 'Morning Shift (10:00 AM - 06:30 PM)';
+  late TextEditingController _fullNameCtrl;
+  late TextEditingController _empCodeCtrl;
+  late TextEditingController _phoneCtrl;
+  late TextEditingController _departmentCtrl;
+  late TextEditingController _designationCtrl;
+  late TextEditingController _salaryCtrl;
+  late DateTime _joiningDate;
+  late String _selectedShift;
 
-  // Camera & Multi-Angle Guided Face Enrolment State
+  // Camera & Multi-Angle Face Registration State
   CameraController? _cameraController;
   List<CameraDescription> _availableCameras = [];
   bool _isCameraInitialized = false;
@@ -50,7 +56,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
 
   GuidedEnrollmentStep _currentStep = GuidedEnrollmentStep.center;
   final List<List<double>> _capturedEmbeddings = [];
-  List<double>? _enrolledFaceEmbedding;
+  List<double>? _synthesizedFaceEmbedding;
   String _faceStatusMessage = 'Step 1 of 3: Look straight at camera 😐';
   bool _isSaving = false;
 
@@ -59,7 +65,23 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
   @override
   void initState() {
     super.initState();
-    _empCodeCtrl.text = 'EMP-${const Uuid().v4().substring(0, 4).toUpperCase()}';
+    _fullNameCtrl = TextEditingController(text: widget.employee.fullName);
+    _empCodeCtrl = TextEditingController(text: widget.employee.employeeCode);
+    _phoneCtrl = TextEditingController(text: widget.employee.phone);
+    _departmentCtrl = TextEditingController(text: widget.employee.department);
+    _designationCtrl = TextEditingController(text: widget.employee.designation);
+    _salaryCtrl = TextEditingController(text: widget.employee.monthlySalary.toStringAsFixed(0));
+    _joiningDate = widget.employee.joiningDate;
+    _selectedShift = widget.employee.assignedShiftId.isNotEmpty
+        ? widget.employee.assignedShiftId
+        : 'Morning Shift (10:00 AM - 06:30 PM)';
+
+    _synthesizedFaceEmbedding = widget.employee.faceEmbedding;
+    if (_synthesizedFaceEmbedding != null && _synthesizedFaceEmbedding!.length == 128) {
+      _currentStep = GuidedEnrollmentStep.completed;
+      _faceStatusMessage = '✓ Existing 3D Face Profile Registered (${_synthesizedFaceEmbedding!.length}D)';
+    }
+
     _initCameraAndFaceService();
   }
 
@@ -104,7 +126,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
   }
 
   // Multi-Angle Step-by-Step Face Capture (Center -> Left -> Right)
-  Future<void> _captureAndEnrollFace() async {
+  Future<void> _captureGuidedStepFace() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       setState(() {
         _faceStatusMessage = '❌ Camera not ready. Please check camera permission.';
@@ -147,16 +169,17 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
             _faceStatusMessage = '✓ Step 2 Complete! Step 3: Turn head slightly RIGHT 👉';
           });
         } else if (_currentStep == GuidedEnrollmentStep.right) {
+          // Synthesize 3D multi-angle embeddings into single L2-normalized 128D embedding
           final synthesized = _faceService.synthesizeMultiAngleEmbedding(_capturedEmbeddings);
           if (synthesized != null) {
             setState(() {
-              _enrolledFaceEmbedding = synthesized;
+              _synthesizedFaceEmbedding = synthesized;
               _currentStep = GuidedEnrollmentStep.completed;
               _faceStatusMessage = '✓ 3D Multi-Angle Face Profile Enrolled Successfully (128D Ready)';
             });
           } else {
             setState(() {
-              _faceStatusMessage = '❌ Synthesis failed. Please reset and retry.';
+              _faceStatusMessage = '❌ Synthesis failed. Please reset and capture face again.';
             });
           }
         }
@@ -181,19 +204,19 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     setState(() {
       _currentStep = GuidedEnrollmentStep.center;
       _capturedEmbeddings.clear();
-      _enrolledFaceEmbedding = null;
+      _synthesizedFaceEmbedding = null;
       _capturedFaceBytes = null;
       _faceStatusMessage = 'Step 1 of 3: Look straight at camera 😐';
     });
   }
 
-  Future<void> _saveEmployee() async {
+  Future<void> _updateEmployee() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_enrolledFaceEmbedding == null) {
+    if (_synthesizedFaceEmbedding == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please capture employee face data before saving!'),
+          content: Text('Please complete multi-angle face enrollment before saving!'),
           backgroundColor: AppColors.haldiGold,
         ),
       );
@@ -203,11 +226,10 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final String empId = const Uuid().v4();
-      final double salary = double.tryParse(_salaryCtrl.text.trim()) ?? 18000.0;
+      final double salary = double.tryParse(_salaryCtrl.text.trim()) ?? widget.employee.monthlySalary;
 
-      final employee = EmployeeModel(
-        employeeId: empId,
+      final updatedEmployee = EmployeeModel(
+        employeeId: widget.employee.employeeId,
         businessId: widget.businessId,
         employeeCode: _empCodeCtrl.text.trim().toUpperCase(),
         fullName: _fullNameCtrl.text.trim(),
@@ -217,30 +239,31 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         assignedShiftId: _selectedShift,
         joiningDate: _joiningDate,
         monthlySalary: salary,
+        active: widget.employee.active,
         faceEnrollmentStatus: true,
-        faceEmbedding: _enrolledFaceEmbedding,
-        createdAt: DateTime.now(),
+        faceEmbedding: _synthesizedFaceEmbedding,
+        createdAt: widget.employee.createdAt,
         updatedAt: DateTime.now(),
       );
 
-      final empMap = employee.toMap();
+      final empMap = updatedEmployee.toMap();
 
-      // 1. Save to Firestore under businesses/{businessId}/employees/{employeeId}
+      // 1. Update in Firestore
       await FirebaseFirestore.instance
           .collection(AppConstants.colBusinesses)
           .doc(widget.businessId)
           .collection(AppConstants.colEmployees)
-          .doc(empId)
-          .set(empMap);
+          .doc(widget.employee.employeeId)
+          .update(empMap);
 
-      // 2. Instant Local SQLite DB Sync for 100% Offline Kiosk Recognition
+      // 2. Sync updated employee locally in SQLite DB
       await OfflineDbService().saveLocalEmployees([empMap]);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Employee "${employee.fullName}" registered & synced locally!'),
+          content: Text('Employee "${updatedEmployee.fullName}" updated & synced!'),
           backgroundColor: AppColors.pannaEmerald,
         ),
       );
@@ -249,7 +272,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving employee: $e'), backgroundColor: AppColors.sindoorRed),
+        SnackBar(content: Text('Error updating employee: $e'), backgroundColor: AppColors.sindoorRed),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -266,7 +289,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.cardDark,
         title: Text(
-          'Register New Staff Employee',
+          'Edit Employee: ${widget.employee.fullName}',
           style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
         ),
         iconTheme: const IconThemeData(color: AppColors.textPrimary),
@@ -284,7 +307,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                       children: [
                         Expanded(flex: 3, child: _buildFormSection(isMobile: false)),
                         const SizedBox(width: 20),
-                        Expanded(flex: 2, child: _buildFaceCaptureSection()),
+                        Expanded(flex: 2, child: _buildGuidedFaceCaptureSection()),
                       ],
                     )
                   : Column(
@@ -292,7 +315,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                       children: [
                         _buildFormSection(isMobile: true),
                         const SizedBox(height: 20),
-                        _buildFaceCaptureSection(),
+                        _buildGuidedFaceCaptureSection(),
                       ],
                     ),
             ),
@@ -340,11 +363,11 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                         : const Icon(Icons.check_circle_outline_rounded, color: Colors.white, size: 20),
                     label: Text(
-                      _isSaving ? 'SAVING...' : 'SAVE & ENROLL STAFF',
+                      _isSaving ? 'UPDATING...' : 'SAVE & UPDATE EMPLOYEE',
                       style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    onPressed: _isSaving ? null : _saveEmployee,
+                    onPressed: _isSaving ? null : _updateEmployee,
                   ),
                 ),
               ),
@@ -368,18 +391,18 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.badge_outlined, color: AppColors.haldiGold, size: 22),
+              const Icon(Icons.edit_note_rounded, color: AppColors.haldiGold, size: 22),
               const SizedBox(width: 10),
               Text(
-                '1. Employee Information',
+                '1. Edit Employee Details',
                 style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ],
           ),
           const SizedBox(height: 16),
 
-          _buildInputField(_fullNameCtrl, 'Full Name *', Icons.person_outline, validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter employee full name' : null),
-          
+          _buildInputField(_fullNameCtrl, 'Full Name *', Icons.person_outline, validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter full name' : null),
+
           if (isMobile) ...[
             _buildInputField(_empCodeCtrl, 'Employee Code *', Icons.tag, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null),
             _buildInputField(_phoneCtrl, 'Phone Number *', Icons.phone_outlined, keyboardType: TextInputType.phone, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null),
@@ -486,7 +509,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     );
   }
 
-  Widget _buildFaceCaptureSection() {
+  Widget _buildGuidedFaceCaptureSection() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -652,7 +675,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
               ),
               onPressed: _isCapturingFace
                   ? null
-                  : (_currentStep == GuidedEnrollmentStep.completed ? _resetGuidedEnrollment : _captureAndEnrollFace),
+                  : (_currentStep == GuidedEnrollmentStep.completed ? _resetGuidedEnrollment : _captureGuidedStepFace),
             ),
           ),
         ],

@@ -428,6 +428,39 @@ class FaceRecognitionService {
     };
   }
 
+  /// Extract Head Yaw Angle (rotation left/right in degrees)
+  double getHeadYawAngle(Face face) {
+    return face.headEulerAngleY ?? 0.0;
+  }
+
+  /// Synthesize multi-pose embeddings (Center, Left, Right) into a single robust 128D vector
+  List<double>? synthesizeMultiAngleEmbedding(List<List<double>> embeddings) {
+    if (embeddings.isEmpty) return null;
+    final int dim = embeddings.first.length;
+    if (dim != 128) return null;
+
+    List<double> avgVector = List.filled(dim, 0.0);
+    for (var vec in embeddings) {
+      if (vec.length != dim) return null;
+      for (int i = 0; i < dim; i++) {
+        avgVector[i] += vec[i];
+      }
+    }
+    for (int i = 0; i < dim; i++) {
+      avgVector[i] /= embeddings.length;
+    }
+
+    final normalized = _normalize(avgVector);
+    final norm = _calculateL2Norm(normalized);
+    final bool isFinite = normalized.every((v) => !v.isNaN && !v.isInfinite);
+
+    if (norm > 0 && isFinite && normalized.length == 128) {
+      debugPrint('✓ Synthesized ${embeddings.length} Multi-Angle Vectors into 128D Embedding (Norm: ${norm.toStringAsFixed(4)})');
+      return normalized;
+    }
+    return null;
+  }
+
   void dispose() {
     _faceDetector.close();
     _tfliteInterpreter?.close();

@@ -110,5 +110,26 @@ void main() {
       expect(restored.faceEmbedding!.length, equals(128));
       expect(restored.faceEmbedding!.first, closeTo(0.0, 0.001));
     });
+
+    test('5. Multi-Angle Embedding Synthesis', () {
+      final vecCenter = List.generate(128, (i) => sin(i.toDouble()));
+      final vecLeft = List.generate(128, (i) => sin(i.toDouble()) + 0.01 * cos(i.toDouble()));
+      final vecRight = List.generate(128, (i) => sin(i.toDouble()) - 0.01 * cos(i.toDouble()));
+
+      final synthesized = faceService.synthesizeMultiAngleEmbedding([vecCenter, vecLeft, vecRight]);
+
+      expect(synthesized, isNotNull);
+      expect(synthesized!.length, equals(128));
+
+      // Calculate L2 norm of synthesized vector
+      final norm = sqrt(synthesized.fold(0.0, (sum, x) => sum + x * x));
+      expect(norm, closeTo(1.0, 0.0001));
+
+      // Compare similarity between synthesized embedding and center embedding
+      final normCenter = sqrt(vecCenter.fold(0.0, (sum, x) => sum + x * x));
+      final normVecCenter = vecCenter.map((x) => x / normCenter).toList();
+      final score = faceService.calculateCosineSimilarity(synthesized, normVecCenter);
+      expect(score, greaterThan(0.95));
+    });
   });
 }

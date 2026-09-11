@@ -8,6 +8,7 @@ import '../../core/services/auth_routing_service.dart';
 import '../../models/employee_model.dart';
 import '../auth/login_screen.dart';
 import 'add_employee_screen.dart';
+import 'edit_employee_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   final String shopId;
@@ -521,8 +522,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Chip(
-                              label: Text(emp.faceEnrollmentStatus ? 'Face ✓' : 'Pending ⚠', style: const TextStyle(color: Colors.white, fontSize: 10)),
+                              label: Text(emp.faceEnrollmentStatus ? '3D Face ✓' : 'Pending ⚠', style: const TextStyle(color: Colors.white, fontSize: 10)),
                               backgroundColor: emp.faceEnrollmentStatus ? AppColors.pannaEmerald : AppColors.haldiGold,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, color: AppColors.kesariSaffron),
+                              tooltip: 'Edit Employee Details & Face Data',
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => EditEmployeeScreen(
+                                      businessId: widget.businessId,
+                                      shopId: widget.shopId,
+                                      employee: emp,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                             IconButton(
                               icon: Icon(emp.active ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded, color: emp.active ? AppColors.haldiGold : AppColors.pannaEmerald),
