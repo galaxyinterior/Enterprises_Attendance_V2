@@ -133,7 +133,13 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   void _startAutoScanner() {
     _autoScanTimer?.cancel();
     _autoScanTimer = Timer.periodic(const Duration(milliseconds: 800), (_) async {
-      if (!mounted || !_isCameraInitialized || _isProcessing || _isShopPaused || _cameraController == null || !_cameraController!.value.isInitialized) {
+      if (!mounted ||
+          !_isCameraInitialized ||
+          _isProcessing ||
+          _isShopPaused ||
+          _cameraController == null ||
+          !_cameraController!.value.isInitialized ||
+          _cameraController!.value.isTakingPicture) {
         return;
       }
       await _autoDetectFrame();
@@ -142,7 +148,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
   Future<void> _autoDetectFrame() async {
     try {
-      if (_isProcessing) return;
+      if (_isProcessing ||
+          _cameraController == null ||
+          !_cameraController!.value.isInitialized ||
+          _cameraController!.value.isTakingPicture) {
+        return;
+      }
       final xFile = await _cameraController!.takePicture();
       final bytes = await xFile.readAsBytes();
 
