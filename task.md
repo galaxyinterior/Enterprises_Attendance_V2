@@ -53,5 +53,5 @@
 - [x] `flutter analyze` 0 errors verification
 
 ## Phase 10: Production Release & Deployment
-- [ ] Build release APK (`flutter build apk`)
-- [ ] Build web bundle (`flutter build web`)
+- [x] Build release APK (`flutter build apk`)
+- [x] Build web bundle (`flutter build web`)
