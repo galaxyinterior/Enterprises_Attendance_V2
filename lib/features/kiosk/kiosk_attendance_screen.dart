@@ -227,10 +227,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         enrolledEmployees: _enrolledStaffCache,
       );
 
-      // Step 2: If new face detected (not found in local DB), show "Please Wait" & scan Cloud Database
+      // Step 2: If face NOT found in local DB, log and search Cloud Database
       if (match == null) {
+        debugPrint('❌ Face vector not found in Local SQLite DB (${_enrolledStaffCache.length} cached). Searching Cloud Firebase Database...');
         setState(() {
-          _statusMessage = '⏳ New Face Detected — Please Wait, Scanning Cloud Database...';
+          _statusMessage = '☁️ Face not in Local DB — Searching Cloud Firebase Database...';
         });
 
         try {
@@ -245,6 +246,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
               .toList();
 
+          debugPrint('Fetched ${cloudEmps.length} total staff documents from Cloud Firebase.');
+
           if (cloudEmps.isNotEmpty) {
             // Save new documents to local SQLite DB
             await _offlineDb.saveLocalEmployees(cloudEmps);
@@ -256,6 +259,13 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               targetEmbedding: targetVector,
               enrolledEmployees: _enrolledStaffCache,
             );
+
+            if (match != null) {
+              debugPrint('✓ Face successfully matched in newly downloaded Cloud Database record!');
+              setState(() {
+                _statusMessage = '✓ Employee Found in Cloud! Syncing & Marking Attendance...';
+              });
+            }
           }
         } catch (e) {
           debugPrint('Cloud fallback sync error: $e');
