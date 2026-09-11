@@ -11,6 +11,16 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+node_modules/
+*.zip
+*.png
+*.sql
+run_app.py
+run_app.bat
+task.md
+pplan.md
+run_rpc.js
+migrate_store_code.js
 
 # IntelliJ related
 *.iml
