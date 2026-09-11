@@ -86,6 +86,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     }
   }
 
+  String _businessName = '';
+
   void _listenToShopStatus() {
     FirebaseFirestore.instance
         .collection(AppConstants.colBusinesses)
@@ -93,9 +95,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         .snapshots()
         .listen((doc) {
       if (doc.exists) {
-        final status = doc.get('status') ?? '';
+        final data = doc.data() ?? {};
+        final status = data['status'] ?? '';
+        final name = data['businessName'] ?? data['shopName'] ?? widget.shopId;
         setState(() {
           _isShopPaused = status == AppConstants.statusPaused;
+          _businessName = name.toString();
         });
       }
     });
@@ -315,7 +320,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  'SHOP KIOSK: ${widget.shopId}',
+                  _businessName.isNotEmpty ? _businessName.toUpperCase() : 'SHOP KIOSK: ${widget.shopId}',
                   style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                 ),
                 const SizedBox(height: 8),
