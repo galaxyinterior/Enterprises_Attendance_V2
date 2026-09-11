@@ -1,7 +1,6 @@
 import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:attendance_app/core/services/face_recognition_service.dart';
-import 'package:attendance_app/models/attendance_model.dart';
 import 'package:attendance_app/models/employee_model.dart';
 
 void main() {
