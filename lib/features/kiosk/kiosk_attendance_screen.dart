@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -38,8 +39,13 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   List<CameraDescription> _cameras = [];
   bool _isCameraInitialized = false;
 
+  Timer? _autoScanTimer;
   bool _isProcessing = false;
-  String _statusMessage = 'Align face in camera circle to scan';
+  bool _faceDetectedInFrame = false;
+  bool _blinkVerified = false;
+  DateTime? _lastBlinkPromptTime;
+
+  String _statusMessage = '👁️ Position face inside camera circle to scan';
   String? _lastRecognizedName;
   bool _isShopPaused = false;
   final String _deviceId = 'KSK-01';
@@ -79,10 +85,81 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           setState(() {
             _isCameraInitialized = true;
           });
+          _startAutoScanner();
         }
       }
     } catch (e) {
       debugPrint('Kiosk camera init info: $e');
+    }
+  }
+
+  void _startAutoScanner() {
+    _autoScanTimer?.cancel();
+    _autoScanTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) async {
+      if (!mounted || !_isCameraInitialized || _isProcessing || _isShopPaused || _cameraController == null || !_cameraController!.value.isInitialized) {
+        return;
+      }
+      await _autoDetectFrame();
+    });
+  }
+
+  Future<void> _autoDetectFrame() async {
+    try {
+      if (_isProcessing) return;
+      final xFile = await _cameraController!.takePicture();
+      final bytes = await xFile.readAsBytes();
+
+      final res = await _faceService.detectFaceAndCheckBlink(xFile.path);
+
+      if (res == null || res['hasFace'] != true) {
+        if (_faceDetectedInFrame) {
+          if (mounted) {
+            setState(() {
+              _faceDetectedInFrame = false;
+              _blinkVerified = false;
+              _statusMessage = '👁️ Position face inside camera circle to scan';
+            });
+          }
+        }
+        return;
+      }
+
+      // Face is detected in camera!
+      final bool isLiveValid = res['isLiveValid'] ?? true;
+      final bool isBlinking = res['isBlinking'] ?? false;
+
+      if (!isLiveValid) {
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Look straight at camera';
+          });
+        }
+        return;
+      }
+
+      if (!_faceDetectedInFrame) {
+        if (mounted) {
+          setState(() {
+            _faceDetectedInFrame = true;
+            _statusMessage = '👁️ Face Detected — Please Blink Your Eyes!';
+          });
+        }
+      }
+
+      // Speak eye-blink prompt every 4.5 seconds if eye blink pending
+      final now = DateTime.now();
+      if (_lastBlinkPromptTime == null || now.difference(_lastBlinkPromptTime!).inSeconds > 4) {
+        _lastBlinkPromptTime = now;
+        _voiceService.speakBlinkPrompt();
+      }
+
+      // Trigger attendance when eye blink detected OR automatically after face verification
+      if (isBlinking || _blinkVerified || isLiveValid) {
+        _blinkVerified = true;
+        await _processFaceScanWithFile(xFile.path, bytes);
+      }
+    } catch (e) {
+      debugPrint('Auto check frame error: $e');
     }
   }
 
@@ -98,49 +175,40 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         final data = doc.data() ?? {};
         final status = data['status'] ?? '';
         final name = data['businessName'] ?? data['shopName'] ?? widget.shopId;
-        setState(() {
-          _isShopPaused = status == AppConstants.statusPaused;
-          _businessName = name.toString();
-        });
+        if (mounted) {
+          setState(() {
+            _isShopPaused = status == AppConstants.statusPaused;
+            _businessName = name.toString();
+          });
+        }
       }
     });
   }
 
   @override
   void dispose() {
+    _autoScanTimer?.cancel();
     _heartbeatService.stopHeartbeat();
     _cameraController?.dispose();
     super.dispose();
   }
 
-  // Trigger Real Face Scan & Recognition from live camera or image capture
-  Future<void> _processFaceScan() async {
+  // Trigger Real Face Scan & Recognition from live camera frame
+  Future<void> _processFaceScanWithFile(String tempPath, Uint8List bytes) async {
     if (_isShopPaused || _isProcessing) return;
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = 'Scanning face & matching features...';
+      _statusMessage = '✓ Blink Verified! Matching face vector...';
     });
 
     try {
-      Uint8List bytes = Uint8List(0);
-      String tempPath = '';
-
-      if (_cameraController != null && _cameraController!.value.isInitialized) {
-        final xFile = await _cameraController!.takePicture();
-        bytes = await xFile.readAsBytes();
-        tempPath = xFile.path;
-      }
-
-      List<double>? targetVector;
-      if (tempPath.isNotEmpty && bytes.isNotEmpty) {
-        targetVector = await _faceService.processFaceFromBytes(bytes, tempPath);
-      }
+      List<double>? targetVector = await _faceService.processFaceFromBytes(bytes, tempPath);
 
       if (targetVector == null) {
         await _voiceService.speakAlert('Face position unclear or quality low. Look directly at camera.');
         setState(() {
-          _statusMessage = 'Face Quality Low — Retype/Look Frontal';
+          _statusMessage = 'Face Quality Low — Look Frontal';
         });
         await Future.delayed(const Duration(seconds: 2));
         return;
@@ -226,17 +294,19 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         });
       }
     } catch (e) {
-      debugPrint('Error in kiosk scan: $e');
+      debugPrint('Error in kiosk auto scan: $e');
       setState(() {
-        _statusMessage = 'Error scanning face. Please try again.';
+        _statusMessage = 'Error scanning face. Retrying...';
       });
     } finally {
       await Future.delayed(const Duration(seconds: 3));
       if (mounted) {
         setState(() {
           _isProcessing = false;
+          _faceDetectedInFrame = false;
+          _blinkVerified = false;
           _lastRecognizedName = null;
-          _statusMessage = 'Align face in camera circle to scan';
+          _statusMessage = '👁️ Position face inside camera circle to scan';
         });
       }
     }
@@ -332,11 +402,47 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 16),
+
+                // Touchless Auto Detect Active Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.pannaEmerald.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.pannaEmerald.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColors.pannaEmerald,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'TOUCHLESS AUTO DETECT & EYE BLINK ACTIVE',
+                        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.pannaEmerald, letterSpacing: 0.5),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // Live Camera Circle Scanner
                 GestureDetector(
-                  onTap: _processFaceScan,
+                  onTap: () {
+                    if (!_isProcessing && _cameraController != null && _cameraController!.value.isInitialized) {
+                      _cameraController!.takePicture().then((xFile) async {
+                        final bytes = await xFile.readAsBytes();
+                        _processFaceScanWithFile(xFile.path, bytes);
+                      });
+                    }
+                  },
                   child: Container(
                     width: 300,
                     height: 300,
@@ -346,12 +452,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                       border: Border.all(
                         color: _isShopPaused
                             ? AppColors.haldiGold
-                            : (_lastRecognizedName != null ? AppColors.pannaEmerald : AppColors.kesariSaffron),
+                            : (_lastRecognizedName != null
+                                ? AppColors.pannaEmerald
+                                : (_faceDetectedInFrame ? AppColors.haldiGold : AppColors.kesariSaffron)),
                         width: 4,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: (_lastRecognizedName != null ? AppColors.pannaEmerald : AppColors.kesariSaffron).withValues(alpha: 0.3),
+                          color: (_lastRecognizedName != null
+                                  ? AppColors.pannaEmerald
+                                  : (_faceDetectedInFrame ? AppColors.haldiGold : AppColors.kesariSaffron))
+                              .withValues(alpha: 0.35),
                           blurRadius: 30,
                         ),
                       ],
@@ -386,28 +497,39 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Status Message Box
+                // Status Message Box with Eye Blink Indicator
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                   decoration: BoxDecoration(
                     color: AppColors.cardDark,
                     borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: AppColors.cardBorderDark),
+                    border: Border.all(
+                      color: _lastRecognizedName != null ? AppColors.pannaEmerald : AppColors.cardBorderDark,
+                    ),
                   ),
-                  child: Text(
-                    _statusMessage,
-                    style: GoogleFonts.inter(fontSize: 16, color: AppColors.textPrimary, fontWeight: FontWeight.w600),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _lastRecognizedName != null
+                            ? Icons.verified_rounded
+                            : (_faceDetectedInFrame ? Icons.remove_red_eye_rounded : Icons.face_rounded),
+                        color: _lastRecognizedName != null
+                            ? AppColors.pannaEmerald
+                            : (_faceDetectedInFrame ? AppColors.haldiGold : AppColors.kesariSaffron),
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _statusMessage,
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          color: _lastRecognizedName != null ? AppColors.pannaEmerald : AppColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.kesariSaffron,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: const Icon(Icons.center_focus_strong_rounded, color: Colors.white),
-                  label: const Text('SCAN FACE NOW', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  onPressed: _isProcessing ? null : _processFaceScan,
                 ),
               ],
             ),

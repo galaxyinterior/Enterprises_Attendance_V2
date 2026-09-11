@@ -71,6 +71,35 @@ class FaceRecognitionService {
     return true;
   }
 
+  /// Detect face and return face info including eye blink probabilities and liveness state
+  Future<Map<String, dynamic>?> detectFaceAndCheckBlink(String imagePath) async {
+    await initialize();
+    try {
+      final inputImage = InputImage.fromFilePath(imagePath);
+      final faces = await detectFaces(inputImage);
+      if (faces.isEmpty) return null;
+
+      final face = faces.first;
+      final leftOpen = face.leftEyeOpenProbability ?? 1.0;
+      final rightOpen = face.rightEyeOpenProbability ?? 1.0;
+
+      // Blink detected if either eye openness drops below 0.4
+      bool isBlinking = (leftOpen < 0.4 || rightOpen < 0.4);
+
+      return {
+        'face': face,
+        'hasFace': true,
+        'isLiveValid': isLiveFaceValid(face),
+        'leftEyeOpen': leftOpen,
+        'rightEyeOpen': rightOpen,
+        'isBlinking': isBlinking,
+      };
+    } catch (e) {
+      debugPrint('Error detecting face & blink: $e');
+      return null;
+    }
+  }
+
   /// Process raw image bytes & path, detect face, crop face ROI, and extract 128D embedding
   Future<List<double>?> processFaceFromBytes(Uint8List bytes, String tempFilePath) async {
     await initialize();

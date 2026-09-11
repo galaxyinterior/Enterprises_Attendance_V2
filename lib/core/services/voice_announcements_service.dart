@@ -39,6 +39,12 @@ class VoiceAnnouncementsService {
     await _flutterTts.speak(message);
   }
 
+  // Speak Blink Eyes Prompt
+  Future<void> speakBlinkPrompt() async {
+    await initialize();
+    await _flutterTts.speak("Please blink your eyes to verify attendance.");
+  }
+
   // Speak window closed or shift mismatch alert
   Future<void> speakAlert(String alertText) async {
     await initialize();
