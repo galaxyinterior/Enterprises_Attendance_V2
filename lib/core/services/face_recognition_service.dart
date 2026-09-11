@@ -32,8 +32,13 @@ class FaceRecognitionService {
     try {
       _tfliteInterpreter = await Interpreter.fromAsset('assets/mobile_facenet.tflite');
       _isInitialized = true;
+      final inputTensor = _tfliteInterpreter!.getInputTensor(0);
+      final outputTensor = _tfliteInterpreter!.getOutputTensor(0);
+      debugPrint('✅ TFLite MobileFaceNet Interpreter Loaded Successfully:');
+      debugPrint('   - Input Tensor Shape: ${inputTensor.shape}, Type: ${inputTensor.type}');
+      debugPrint('   - Output Tensor Shape: ${outputTensor.shape}, Type: ${outputTensor.type}');
     } catch (e) {
-      debugPrint('Error initializing MobileFaceNet TFLite interpreter: $e');
+      debugPrint('❌ Error initializing MobileFaceNet TFLite interpreter: $e');
     }
   }
 

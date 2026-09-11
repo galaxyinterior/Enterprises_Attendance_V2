@@ -57,6 +57,11 @@ class OfflineDbService {
             faceEmbedding TEXT
           )
         ''');
+
+        // Indexes for high performance
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_emp_business ON local_employees(businessId)');
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_att_sync ON offline_attendance(syncStatus)');
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_att_dup ON offline_attendance(employeeId, date)');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
