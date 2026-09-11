@@ -49,6 +49,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   Map<String, dynamic>? _lastRecognizedEmployee;
   String _statusMessage = '👁️ Position face inside camera circle to scan';
   String? _lastRecognizedName;
+  bool _noMatchFound = false;
+  String? _scanFailureReason;
   bool _isShopPaused = false;
   final String _deviceId = 'KSK-01';
 
@@ -379,14 +381,22 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           setState(() {
             _lastRecognizedEmployee = empData;
             _lastRecognizedName = name;
+            _noMatchFound = false;
+            _scanFailureReason = null;
             _statusMessage = '✓ Welcome $name! ${shiftResult.statusLabel}.';
           });
         }
       } else {
         await _voiceService.speakAlert('Face not recognized. Please try again.');
+        final String reason = _enrolledStaffCache.isEmpty
+            ? 'No enrolled staff records found in system database.'
+            : 'Unregistered face (No match found in ${_enrolledStaffCache.length} enrolled staff)';
         setState(() {
           _lastRecognizedEmployee = null;
-          _statusMessage = '❌ Face Not Recognized (No Match Found)';
+          _lastRecognizedName = null;
+          _noMatchFound = true;
+          _scanFailureReason = reason;
+          _statusMessage = '❌ Face Not Recognized — No Match Found';
         });
       }
     } catch (e) {
@@ -402,6 +412,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           _faceDetectedInFrame = false;
           _lastRecognizedName = null;
           _lastRecognizedEmployee = null;
+          _noMatchFound = false;
+          _scanFailureReason = null;
           _statusMessage = '👁️ Position face inside camera circle to scan';
         });
       }
@@ -706,6 +718,65 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
                           ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // Unrecognized / No Data Found Failure Banner
+                if (_noMatchFound) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardDark,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.sindoorRed, width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.sindoorRed.withValues(alpha: 0.25),
+                          blurRadius: 20,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const CircleAvatar(
+                              radius: 22,
+                              backgroundColor: AppColors.sindoorRed,
+                              child: Icon(Icons.person_off_rounded, color: Colors.white, size: 26),
+                            ),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'NO MATCH / DATA FOUND',
+                                  style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.sindoorRed),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _scanFailureReason ?? 'Unregistered Face • Attendance Not Marked',
+                                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.haldiGold, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Chip(
+                          backgroundColor: AppColors.sindoorRed.withValues(alpha: 0.15),
+                          side: const BorderSide(color: AppColors.sindoorRed),
+                          avatar: const Icon(Icons.error_outline_rounded, size: 14, color: AppColors.sindoorRed),
+                          label: const Text('ACCESS DENIED / NOT ENROLLED', style: TextStyle(fontSize: 11, color: AppColors.sindoorRed, fontWeight: FontWeight.bold)),
+                          padding: EdgeInsets.zero,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                       ],
                     ),
