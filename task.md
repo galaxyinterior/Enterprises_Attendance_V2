@@ -7,10 +7,10 @@
 - [x] `flutter analyze` 0 errors / warnings check
 
 ## Phase 1: Real Face Enrollment (Admin Panel)
-- [ ] Real Face Vector extraction during employee registration in `AddEmployeeScreen`
-- [ ] Safe double-precision list conversion for Firestore (`faceEmbedding` 128D array)
-- [ ] Instant enrollment save to local SQLite DB (`local_employees`)
-- [ ] Face Enrollment Status Badge (`Enrolled` vs `Pending`) in Admin Staff List
+- [x] Real Face Vector extraction during employee registration in `AddEmployeeScreen`
+- [x] Safe double-precision list conversion for Firestore (`faceEmbedding` 128D array)
+- [x] Instant enrollment save to local SQLite DB (`local_employees`)
+- [x] Face Enrollment Status Badge (`Enrolled` vs `Pending`) in Admin Staff List
 
 ## Phase 2: Production-Grade Kiosk Face Recognition Engine (100% Offline)
 - [ ] Eliminate mid-scan network blocking calls

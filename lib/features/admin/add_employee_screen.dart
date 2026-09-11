@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/face_recognition_service.dart';
+import '../../core/services/offline_db_service.dart';
 import '../../models/employee_model.dart';
 
 class AddEmployeeScreen extends StatefulWidget {
@@ -113,25 +114,36 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         bytes = await xFile.readAsBytes();
         tempPath = xFile.path;
       } else {
-        tempPath = 'fallback_face';
+        setState(() {
+          _enrolledFaceEmbedding = null;
+          _faceStatusMessage = '❌ Camera not ready. Please enable camera permission and retry.';
+        });
+        return;
       }
 
       List<double>? embedding;
-      if (tempPath != 'fallback_face' && bytes.isNotEmpty) {
+      if (tempPath.isNotEmpty && bytes.isNotEmpty) {
         embedding = await _faceService.processFaceFromBytes(bytes, tempPath);
       }
 
-      embedding ??= List.generate(128, (i) => (i % 2 == 0 ? 0.08 : -0.08));
-
-      setState(() {
-        _capturedFaceBytes = bytes;
-        _enrolledFaceEmbedding = embedding;
-        _faceStatusMessage = '✓ Face Features Enrolled (128D Embedding Ready)';
-      });
+      if (embedding != null && embedding.isNotEmpty) {
+        final vecLen = embedding.length;
+        setState(() {
+          _capturedFaceBytes = bytes;
+          _enrolledFaceEmbedding = embedding;
+          _faceStatusMessage = '✓ Face Features Enrolled (${vecLen}D Embedding Ready)';
+        });
+      } else {
+        setState(() {
+          _capturedFaceBytes = bytes;
+          _enrolledFaceEmbedding = null;
+          _faceStatusMessage = '❌ Face Quality Low / Not Found! Please position face clearly in camera frame.';
+        });
+      }
     } catch (e) {
       setState(() {
-        _faceStatusMessage = 'Face quality warning: $e. Fallback vector assigned.';
-        _enrolledFaceEmbedding = List.generate(128, (i) => (i % 2 == 0 ? 0.08 : -0.08));
+        _enrolledFaceEmbedding = null;
+        _faceStatusMessage = '❌ Face extraction failed: $e';
       });
     } finally {
       setState(() {
@@ -176,19 +188,24 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         updatedAt: DateTime.now(),
       );
 
-      // Save to Firestore under businesses/{businessId}/employees/{employeeId}
+      final empMap = employee.toMap();
+
+      // 1. Save to Firestore under businesses/{businessId}/employees/{employeeId}
       await FirebaseFirestore.instance
           .collection(AppConstants.colBusinesses)
           .doc(widget.businessId)
           .collection(AppConstants.colEmployees)
           .doc(empId)
-          .set(employee.toMap());
+          .set(empMap);
+
+      // 2. Instant Local SQLite DB Sync for 100% Offline Kiosk Recognition
+      await OfflineDbService().saveLocalEmployees([empMap]);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Employee "${employee.fullName}" registered successfully!'),
+          content: Text('Employee "${employee.fullName}" registered & synced locally!'),
           backgroundColor: AppColors.pannaEmerald,
         ),
       );
