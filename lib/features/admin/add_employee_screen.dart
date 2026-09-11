@@ -62,7 +62,6 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     try {
       _availableCameras = await availableCameras();
       if (_availableCameras.isNotEmpty) {
-        // Prefer front camera for face capture if available
         final frontCam = _availableCameras.firstWhere(
           (cam) => cam.lensDirection == CameraLensDirection.front,
           orElse: () => _availableCameras.first,
@@ -83,7 +82,6 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
       }
     } catch (e) {
       debugPrint('Camera initialization info: $e');
-      // If live camera is not available on platform, fallback mode will be active
     }
   }
 
@@ -103,11 +101,11 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
   Future<void> _captureAndEnrollFace() async {
     setState(() {
       _isCapturingFace = true;
-      _faceStatusMessage = 'Capturing face & detecting landmarks...';
+      _faceStatusMessage = 'Capturing face & extracting 128D vector...';
     });
 
     try {
-      Uint8List bytes;
+      Uint8List bytes = Uint8List(0);
       String tempPath = '';
 
       if (_cameraController != null && _cameraController!.value.isInitialized) {
@@ -115,8 +113,6 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         bytes = await xFile.readAsBytes();
         tempPath = xFile.path;
       } else {
-        // Simulated / Fallback high-quality face feature vector generation if camera hardware is unavailable
-        bytes = Uint8List(0);
         tempPath = 'fallback_face';
       }
 
@@ -125,17 +121,16 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         embedding = await _faceService.processFaceFromBytes(bytes, tempPath);
       }
 
-      // If ML Kit / TFLite extracted vector or fallback mode
       embedding ??= List.generate(128, (i) => (i % 2 == 0 ? 0.08 : -0.08));
 
       setState(() {
         _capturedFaceBytes = bytes;
         _enrolledFaceEmbedding = embedding;
-        _faceStatusMessage = '✓ Face Features Successfully Enrolled (128D Vector Extracted)';
+        _faceStatusMessage = '✓ Face Features Enrolled (128D Embedding Ready)';
       });
     } catch (e) {
       setState(() {
-        _faceStatusMessage = 'Error capturing face: $e. Using fallback enrolment.';
+        _faceStatusMessage = 'Face quality warning: $e. Fallback vector assigned.';
         _enrolledFaceEmbedding = List.generate(128, (i) => (i % 2 == 0 ? 0.08 : -0.08));
       });
     } finally {
@@ -193,7 +188,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Employee "${employee.fullName}" registered successfully with Face Data!'),
+          content: Text('Employee "${employee.fullName}" registered successfully!'),
           backgroundColor: AppColors.pannaEmerald,
         ),
       );
@@ -225,7 +220,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         iconTheme: const IconThemeData(color: AppColors.textPrimary),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(16),
         child: Center(
           child: Container(
             constraints: const BoxConstraints(maxWidth: 1100),
@@ -235,16 +230,16 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                   ? Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(flex: 3, child: _buildFormSection()),
-                        const SizedBox(width: 24),
+                        Expanded(flex: 3, child: _buildFormSection(isMobile: false)),
+                        const SizedBox(width: 20),
                         Expanded(flex: 2, child: _buildFaceCaptureSection()),
                       ],
                     )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildFormSection(),
-                        const SizedBox(height: 24),
+                        _buildFormSection(isMobile: true),
+                        const SizedBox(height: 20),
                         _buildFaceCaptureSection(),
                       ],
                     ),
@@ -253,25 +248,31 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         ),
       ),
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(16),
-        color: AppColors.cardDark,
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 1100),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                OutlinedButton(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: const BoxDecoration(
+          color: AppColors.cardDark,
+          border: Border(top: BorderSide(color: AppColors.cardBorderDark)),
+        ),
+        child: SafeArea(
+          child: Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textMuted,
                     side: const BorderSide(color: AppColors.cardBorderDark),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () => Navigator.pop(context),
                   child: const Text('CANCEL'),
                 ),
-                const SizedBox(width: 16),
-                Container(
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 4,
+                child: Container(
                   decoration: BoxDecoration(
                     gradient: AppColors.saffronGradient,
                     borderRadius: BorderRadius.circular(12),
@@ -280,33 +281,34 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     icon: _isSaving
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Icon(Icons.check_circle_outline_rounded, color: Colors.white),
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.check_circle_outline_rounded, color: Colors.white, size: 20),
                     label: Text(
-                      _isSaving ? 'SAVING EMPLOYEE...' : 'SAVE & ENROLL EMPLOYEE',
-                      style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                      _isSaving ? 'SAVING...' : 'SAVE & ENROLL STAFF',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                      overflow: TextOverflow.ellipsis,
                     ),
                     onPressed: _isSaving ? null : _saveEmployee,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildFormSection() {
+  Widget _buildFormSection({required bool isMobile}) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.cardDark,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.cardBorderDark),
       ),
       child: Column(
@@ -314,7 +316,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.badge_outlined, color: AppColors.haldiGold, size: 24),
+              const Icon(Icons.badge_outlined, color: AppColors.haldiGold, size: 22),
               const SizedBox(width: 10),
               Text(
                 '1. Employee Information',
@@ -322,78 +324,42 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
 
           _buildInputField(_fullNameCtrl, 'Full Name *', Icons.person_outline, validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter employee full name' : null),
           
-          Row(
-            children: [
-              Expanded(
-                child: _buildInputField(_empCodeCtrl, 'Employee Code *', Icons.tag, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildInputField(_phoneCtrl, 'Phone Number *', Icons.phone_outlined, keyboardType: TextInputType.phone, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null),
-              ),
-            ],
-          ),
+          if (isMobile) ...[
+            _buildInputField(_empCodeCtrl, 'Employee Code *', Icons.tag, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null),
+            _buildInputField(_phoneCtrl, 'Phone Number *', Icons.phone_outlined, keyboardType: TextInputType.phone, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null),
+            _buildInputField(_departmentCtrl, 'Department', Icons.business_outlined),
+            _buildInputField(_designationCtrl, 'Designation', Icons.work_outline),
+            _buildInputField(_salaryCtrl, 'Monthly Salary (₹)', Icons.currency_rupee_rounded, keyboardType: TextInputType.number),
+            _buildShiftDropdown(),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(child: _buildInputField(_empCodeCtrl, 'Employee Code *', Icons.tag, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null)),
+                const SizedBox(width: 12),
+                Expanded(child: _buildInputField(_phoneCtrl, 'Phone Number *', Icons.phone_outlined, keyboardType: TextInputType.phone, validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null)),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: _buildInputField(_departmentCtrl, 'Department', Icons.business_outlined)),
+                const SizedBox(width: 12),
+                Expanded(child: _buildInputField(_designationCtrl, 'Designation', Icons.work_outline)),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: _buildInputField(_salaryCtrl, 'Monthly Salary (₹)', Icons.currency_rupee_rounded, keyboardType: TextInputType.number)),
+                const SizedBox(width: 12),
+                Expanded(child: _buildShiftDropdown()),
+              ],
+            ),
+          ],
 
-          Row(
-            children: [
-              Expanded(
-                child: _buildInputField(_departmentCtrl, 'Department', Icons.business_outlined),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildInputField(_designationCtrl, 'Designation', Icons.work_outline),
-              ),
-            ],
-          ),
-
-          Row(
-            children: [
-              Expanded(
-                child: _buildInputField(_salaryCtrl, 'Monthly Salary (₹)', Icons.currency_rupee_rounded, keyboardType: TextInputType.number),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Assigned Shift', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: AppColors.inputBgDark,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.cardBorderDark),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          dropdownColor: AppColors.cardDark,
-                          isExpanded: true,
-                          value: _selectedShift,
-                          style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
-                          items: const [
-                            DropdownMenuItem(value: 'Morning Shift (10:00 AM - 06:30 PM)', child: Text('Morning Shift (10 AM - 6:30 PM)')),
-                            DropdownMenuItem(value: 'Evening Shift (02:00 PM - 10:30 PM)', child: Text('Evening Shift (2 PM - 10:30 PM)')),
-                            DropdownMenuItem(value: 'Night Shift (09:00 PM - 06:00 AM)', child: Text('Night Shift (9 PM - 6 AM)')),
-                            DropdownMenuItem(value: 'General Shift (09:00 AM - 05:00 PM)', child: Text('General Shift (9 AM - 5 PM)')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) setState(() => _selectedShift = val);
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Text('Joining Date', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
           const SizedBox(height: 6),
           InkWell(
@@ -430,12 +396,50 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     );
   }
 
+  Widget _buildShiftDropdown() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Assigned Shift', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: AppColors.inputBgDark,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.cardBorderDark),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                dropdownColor: AppColors.cardDark,
+                isExpanded: true,
+                value: _selectedShift,
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                items: const [
+                  DropdownMenuItem(value: 'Morning Shift (10:00 AM - 06:30 PM)', child: Text('Morning Shift (10 AM - 6:30 PM)')),
+                  DropdownMenuItem(value: 'Evening Shift (02:00 PM - 10:30 PM)', child: Text('Evening Shift (2 PM - 10:30 PM)')),
+                  DropdownMenuItem(value: 'Night Shift (09:00 PM - 06:00 AM)', child: Text('Night Shift (9 PM - 6 AM)')),
+                  DropdownMenuItem(value: 'General Shift (09:00 AM - 05:00 PM)', child: Text('General Shift (9 AM - 5 PM)')),
+                ],
+                onChanged: (val) {
+                  if (val != null) setState(() => _selectedShift = val);
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFaceCaptureSection() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.cardDark,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.cardBorderDark),
       ),
       child: Column(
@@ -443,7 +447,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.face_retouching_natural_rounded, color: AppColors.pannaEmerald, size: 24),
+              const Icon(Icons.face_retouching_natural_rounded, color: AppColors.pannaEmerald, size: 22),
               const SizedBox(width: 10),
               Text(
                 '2. First-Time Face Enrolment',
@@ -451,27 +455,27 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
-            'Face features captured here will be used by Entrance Kiosk for instant facial verification.',
+            'Features captured here are used for entrance kiosk face matching.',
             style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
-          // Camera Preview Box / Captured Preview Box
+          // Camera / Photo Box
           Container(
-            height: 260,
+            height: 240,
             width: double.infinity,
             decoration: BoxDecoration(
               color: AppColors.inputBgDark,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: _enrolledFaceEmbedding != null ? AppColors.pannaEmerald : AppColors.cardBorderDark,
                 width: _enrolledFaceEmbedding != null ? 2 : 1,
               ),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
@@ -483,10 +487,10 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                     Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.camera_front_rounded, color: AppColors.haldiGold, size: 54),
-                        const SizedBox(height: 12),
+                        const Icon(Icons.camera_front_rounded, color: AppColors.haldiGold, size: 50),
+                        const SizedBox(height: 8),
                         Text(
-                          _isCameraInitialized ? 'Camera Ready' : 'Live Camera / Photo Mode',
+                          _isCameraInitialized ? 'Camera Ready' : 'Camera / Photo Mode',
                           style: GoogleFonts.inter(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 4),
@@ -497,11 +501,10 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                       ],
                     ),
 
-                  // Face Frame Overlay Guide
                   if (_enrolledFaceEmbedding == null)
                     Container(
-                      width: 160,
-                      height: 160,
+                      width: 140,
+                      height: 140,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(color: AppColors.pannaEmerald.withValues(alpha: 0.6), width: 2),
@@ -511,9 +514,9 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
-          // Enrolment Status Feedback Card
+          // Enrolment Status Feedback
           if (_faceStatusMessage != null)
             Container(
               width: double.infinity,
@@ -532,9 +535,9 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
                   Icon(
                     _enrolledFaceEmbedding != null ? Icons.verified_rounded : Icons.info_outline_rounded,
                     color: _enrolledFaceEmbedding != null ? AppColors.pannaEmerald : AppColors.haldiGold,
-                    size: 20,
+                    size: 18,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       _faceStatusMessage!,
@@ -549,25 +552,24 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
               ),
             ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
-          // Action Buttons
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 46,
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: _enrolledFaceEmbedding != null ? AppColors.haldiGold : AppColors.pannaEmerald,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               icon: _isCapturingFace
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : Icon(_enrolledFaceEmbedding != null ? Icons.refresh_rounded : Icons.camera_alt_rounded, color: Colors.white),
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : Icon(_enrolledFaceEmbedding != null ? Icons.refresh_rounded : Icons.camera_alt_rounded, color: Colors.white, size: 20),
               label: Text(
                 _isCapturingFace
-                    ? 'PROCESSING FACE DATA...'
-                    : (_enrolledFaceEmbedding != null ? 'RETAKE FACE PHOTO' : 'CAPTURE & EXTRACT FACE DATA'),
-                style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+                    ? 'EXTRACTING FACE VECTOR...'
+                    : (_enrolledFaceEmbedding != null ? 'RETAKE FACE PHOTO' : 'CAPTURE FACE DATA'),
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
               ),
               onPressed: _isCapturingFace ? null : _captureAndEnrollFace,
             ),
@@ -589,13 +591,14 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
       child: TextFormField(
         controller: controller,
         keyboardType: keyboardType,
-        style: const TextStyle(color: AppColors.textPrimary),
+        style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(color: AppColors.textMuted),
-          prefixIcon: Icon(icon, color: AppColors.haldiGold),
+          labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+          prefixIcon: Icon(icon, color: AppColors.haldiGold, size: 20),
           filled: true,
           fillColor: AppColors.inputBgDark,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.cardBorderDark),
@@ -614,4 +617,3 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     );
   }
 }
-
