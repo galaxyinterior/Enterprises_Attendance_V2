@@ -183,12 +183,20 @@ class FaceRecognitionService {
     double highestScore = -1.0;
 
     for (var emp in enrolledEmployees) {
-      final List<double>? embedding = emp['faceEmbedding'] != null
-          ? List<double>.from(emp['faceEmbedding'])
-          : null;
-      if (embedding == null || embedding.isEmpty) continue;
+      if (emp['faceEmbedding'] == null) continue;
+      List<double> embedding = [];
+      try {
+        final rawList = emp['faceEmbedding'] as List;
+        embedding = rawList.map((x) => (x as num).toDouble()).toList();
+      } catch (e) {
+        debugPrint('Error casting faceEmbedding for ${emp['fullName']}: $e');
+        continue;
+      }
+      if (embedding.isEmpty) continue;
 
       final score = calculateCosineSimilarity(targetEmbedding, embedding);
+      debugPrint('🔍 Comparing Face with "${emp['fullName']}": Score = ${score.toStringAsFixed(4)} | Threshold = $threshold');
+
       if (score > highestScore) {
         highestScore = score;
         bestMatchEmployeeId = emp['employeeId'];
@@ -198,6 +206,7 @@ class FaceRecognitionService {
     }
 
     if (highestScore >= threshold && bestMatchEmployeeId != null) {
+      debugPrint('✓ SUCCESSFUL FACE MATCH: $bestMatchName (Score: ${highestScore.toStringAsFixed(4)})');
       return {
         'employeeId': bestMatchEmployeeId,
         'employeeName': bestMatchName,
@@ -206,6 +215,7 @@ class FaceRecognitionService {
       };
     }
 
+    debugPrint('❌ NO MATCH FOUND (Highest Score: ${highestScore.toStringAsFixed(4)} < Threshold: $threshold)');
     return null; // Unknown / No Match
   }
 
