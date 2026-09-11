@@ -42,8 +42,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   Timer? _autoScanTimer;
   bool _isProcessing = false;
   bool _faceDetectedInFrame = false;
-  bool _blinkVerified = false;
-  DateTime? _lastBlinkPromptTime;
 
   Map<String, dynamic>? _lastRecognizedEmployee;
   String _statusMessage = '👁️ Position face inside camera circle to scan';
@@ -117,7 +115,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           if (mounted) {
             setState(() {
               _faceDetectedInFrame = false;
-              _blinkVerified = false;
               _statusMessage = '👁️ Position face inside camera circle to scan';
             });
           }
@@ -285,7 +282,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         setState(() {
           _isProcessing = false;
           _faceDetectedInFrame = false;
-          _blinkVerified = false;
           _lastRecognizedName = null;
           _lastRecognizedEmployee = null;
           _statusMessage = '👁️ Position face inside camera circle to scan';
