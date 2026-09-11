@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/services/auth_routing_service.dart';
 import '../../models/employee_model.dart';
 import '../auth/login_screen.dart';
 import 'add_employee_screen.dart';
@@ -50,10 +51,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           IconButton(
             tooltip: 'Logout',
             icon: const Icon(Icons.logout_rounded, color: AppColors.sindoorRed),
-            onPressed: () {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-              );
+            onPressed: () async {
+              await AuthRoutingService().signOut();
+              if (context.mounted) {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                );
+              }
             },
           ),
         ],

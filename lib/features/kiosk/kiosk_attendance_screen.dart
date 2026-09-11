@@ -10,6 +10,7 @@ import '../../core/services/face_recognition_service.dart';
 import '../../core/services/voice_announcements_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../core/services/kiosk_heartbeat_service.dart';
+import '../../core/services/auth_routing_service.dart';
 import '../../models/attendance_model.dart';
 import '../auth/login_screen.dart';
 
@@ -279,13 +280,16 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
-              onPressed: () {
+              onPressed: () async {
                 final pin = pinCtrl.text.trim();
                 if (pin == '1234' || pin.length >= 4) {
-                  Navigator.pop(context);
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  );
+                  await AuthRoutingService().signOut();
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    );
+                  }
                 } else {
                   setModalState(() {
                     errorMsg = 'Incorrect Security PIN';

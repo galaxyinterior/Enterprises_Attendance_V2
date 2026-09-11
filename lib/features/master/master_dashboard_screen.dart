@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/services/shop_provisioning_service.dart';
+import '../../core/services/auth_routing_service.dart';
 import '../../models/registration_request_model.dart';
 import '../../models/business_model.dart';
 import '../auth/login_screen.dart';
@@ -43,10 +44,13 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
             tooltip: 'Sign Out',
-            onPressed: () {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-              );
+            onPressed: () async {
+              await AuthRoutingService().signOut();
+              if (context.mounted) {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                );
+              }
             },
           ),
         ],
