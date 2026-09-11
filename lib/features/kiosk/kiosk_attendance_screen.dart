@@ -64,19 +64,33 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   }
 
   void _listenToEnrolledStaff() {
+    // 1. Initial load from local SQLite database for 100% offline availability
+    _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId).then((localEmps) {
+      if (mounted && localEmps.isNotEmpty) {
+        setState(() {
+          _enrolledStaffCache = localEmps;
+        });
+      }
+    });
+
+    // 2. Real-time sync from Cloud Firestore to Local SQLite database
     FirebaseFirestore.instance
         .collection(AppConstants.colBusinesses)
         .doc(widget.businessId)
         .collection(AppConstants.colEmployees)
         .snapshots()
-        .listen((snapshot) {
+        .listen((snapshot) async {
       final enrolled = snapshot.docs
           .map((doc) => doc.data())
           .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
           .toList();
+      
+      await _offlineDb.saveLocalEmployees(enrolled);
+      final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+
       if (mounted) {
         setState(() {
-          _enrolledStaffCache = enrolled;
+          _enrolledStaffCache = updatedLocal;
         });
       }
     });
@@ -148,7 +162,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         if (mounted) {
           setState(() {
             _faceDetectedInFrame = true;
-            _statusMessage = '👁️ Face Detected — Matching & Verifying...';
+            _statusMessage = '👁️ Face Detected — Verifying locally...';
           });
         }
       }
@@ -196,7 +210,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = '✓ Face Verified! Matching database...';
+      _statusMessage = '⚡ Verifying face in Local Database...';
     });
 
     try {
@@ -207,20 +221,46 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         return;
       }
 
-      if (_enrolledStaffCache.isEmpty) {
-        await _voiceService.speakAlert('No enrolled staff with face vectors in database.');
-        setState(() {
-          _statusMessage = '⚠️ No Staff Face Data in Database (Add Staff in Admin Panel)';
-        });
-        await Future.delayed(const Duration(seconds: 2));
-        return;
-      }
-
-      // Perform instant memory cosine similarity match
-      final match = _faceService.matchFace(
+      // Step 1: Perform 100% offline local SQLite memory match
+      var match = _faceService.matchFace(
         targetEmbedding: targetVector,
         enrolledEmployees: _enrolledStaffCache,
       );
+
+      // Step 2: If new face detected (not found in local DB), show "Please Wait" & scan Cloud Database
+      if (match == null) {
+        setState(() {
+          _statusMessage = '⏳ New Face Detected — Please Wait, Scanning Cloud Database...';
+        });
+
+        try {
+          final snapshot = await FirebaseFirestore.instance
+              .collection(AppConstants.colBusinesses)
+              .doc(widget.businessId)
+              .collection(AppConstants.colEmployees)
+              .get();
+
+          final cloudEmps = snapshot.docs
+              .map((doc) => doc.data())
+              .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+              .toList();
+
+          if (cloudEmps.isNotEmpty) {
+            // Save new documents to local SQLite DB
+            await _offlineDb.saveLocalEmployees(cloudEmps);
+            final freshLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+            _enrolledStaffCache = freshLocal;
+
+            // Re-run instant matching on updated local database!
+            match = _faceService.matchFace(
+              targetEmbedding: targetVector,
+              enrolledEmployees: _enrolledStaffCache,
+            );
+          }
+        } catch (e) {
+          debugPrint('Cloud fallback sync error: $e');
+        }
+      }
 
       if (match != null) {
         final String empId = match['employeeId'];

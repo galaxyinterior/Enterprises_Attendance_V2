@@ -23,7 +23,7 @@ class OfflineDbService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         // Attendance offline queue table
         await db.execute('''
@@ -49,11 +49,25 @@ class OfflineDbService {
           CREATE TABLE local_employees (
             employeeId TEXT PRIMARY KEY,
             businessId TEXT,
+            empCode TEXT,
             fullName TEXT,
+            phone TEXT,
+            department TEXT,
+            designation TEXT,
             assignedShiftId TEXT,
             faceEmbedding TEXT
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          try {
+            await db.execute('ALTER TABLE local_employees ADD COLUMN empCode TEXT');
+            await db.execute('ALTER TABLE local_employees ADD COLUMN phone TEXT');
+            await db.execute('ALTER TABLE local_employees ADD COLUMN department TEXT');
+            await db.execute('ALTER TABLE local_employees ADD COLUMN designation TEXT');
+          } catch (_) {}
+        }
       },
     );
   }
@@ -115,31 +129,65 @@ class OfflineDbService {
     );
   }
 
-  // Cache local employees with embeddings
-  Future<void> cacheLocalEmployee(EmployeeModel employee) async {
+  // Save/Sync list of employees into local SQLite database
+  Future<void> saveLocalEmployees(List<Map<String, dynamic>> employeeMaps) async {
     final db = await database;
-    await db.insert(
-      'local_employees',
-      {
-        'employeeId': employee.employeeId,
-        'businessId': employee.businessId,
-        'fullName': employee.fullName,
-        'assignedShiftId': employee.assignedShiftId,
-        'faceEmbedding': employee.faceEmbedding != null
-            ? jsonEncode(employee.faceEmbedding)
-            : null,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    final batch = db.batch();
+    for (var emp in employeeMaps) {
+      final String empId = emp['employeeId'] ?? '';
+      if (empId.isEmpty) continue;
+      final embedding = emp['faceEmbedding'];
+      batch.insert(
+        'local_employees',
+        {
+          'employeeId': empId,
+          'businessId': emp['businessId'] ?? '',
+          'empCode': emp['empCode'] ?? emp['employeeCode'] ?? '',
+          'fullName': emp['fullName'] ?? '',
+          'phone': emp['phone'] ?? emp['phoneNumber'] ?? '',
+          'department': emp['department'] ?? '',
+          'designation': emp['designation'] ?? '',
+          'assignedShiftId': emp['assignedShiftId'] ?? '',
+          'faceEmbedding': embedding != null ? jsonEncode(embedding) : null,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
   }
 
-  // Get all cached local employees for offline face recognition
-  Future<List<Map<String, dynamic>>> getLocalEmployees(String businessId) async {
+  // Get all cached local employees for 100% offline face recognition
+  Future<List<Map<String, dynamic>>> getLocalEmployeesWithEmbeddings(String businessId) async {
     final db = await database;
-    return await db.query(
+    final List<Map<String, dynamic>> rows = await db.query(
       'local_employees',
       where: 'businessId = ?',
       whereArgs: [businessId],
     );
+
+    List<Map<String, dynamic>> result = [];
+    for (var row in rows) {
+      final embeddingStr = row['faceEmbedding'];
+      if (embeddingStr != null && embeddingStr.toString().isNotEmpty) {
+        try {
+          final List<dynamic> decoded = jsonDecode(embeddingStr);
+          final List<double> vector = decoded.map((e) => (e as num).toDouble()).toList();
+          if (vector.isNotEmpty) {
+            result.add({
+              'employeeId': row['employeeId'],
+              'businessId': row['businessId'],
+              'empCode': row['empCode'],
+              'fullName': row['fullName'],
+              'phone': row['phone'],
+              'department': row['department'],
+              'designation': row['designation'],
+              'assignedShiftId': row['assignedShiftId'],
+              'faceEmbedding': vector,
+            });
+          }
+        } catch (_) {}
+      }
+    }
+    return result;
   }
 }
