@@ -121,12 +121,22 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
         return;
       }
 
-      List<double>? embedding;
+      Map<String, dynamic> faceResult = {};
       if (tempPath.isNotEmpty && bytes.isNotEmpty) {
-        embedding = await _faceService.processFaceFromBytes(bytes, tempPath);
+        faceResult = await _faceService.processFaceFromBytesDetailed(
+          bytes: bytes,
+          tempFilePath: tempPath,
+          context: 'ENROLLMENT',
+          employeeId: _empCodeCtrl.text.trim(),
+        );
       }
 
-      if (embedding != null && embedding.isNotEmpty) {
+      List<double>? embedding;
+      if (faceResult['success'] == true && faceResult['embedding'] != null) {
+        embedding = faceResult['embedding'] as List<double>;
+      }
+
+      if (embedding != null && embedding.length == 128) {
         final vecLen = embedding.length;
         setState(() {
           _capturedFaceBytes = bytes;
@@ -134,10 +144,11 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
           _faceStatusMessage = '✓ Face Features Enrolled (${vecLen}D Embedding Ready)';
         });
       } else {
+        final String errReason = faceResult['error'] ?? 'Face Quality Low / Not Found';
         setState(() {
           _capturedFaceBytes = bytes;
           _enrolledFaceEmbedding = null;
-          _faceStatusMessage = '❌ Face Quality Low / Not Found! Please position face clearly in camera frame.';
+          _faceStatusMessage = '❌ Enrolment Failed: $errReason! Position face clearly in camera frame.';
         });
       }
     } catch (e) {

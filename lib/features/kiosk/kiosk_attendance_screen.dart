@@ -69,6 +69,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   void _listenToEnrolledStaff() {
     // 1. Initial load from local SQLite database for 100% offline availability
     _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId).then((localEmps) {
+      _logCacheDiagnostics(localEmps);
       if (mounted && localEmps.isNotEmpty) {
         setState(() {
           _enrolledStaffCache = localEmps;
@@ -90,6 +91,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
       
       await _offlineDb.saveLocalEmployees(enrolled);
       final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+      _logCacheDiagnostics(updatedLocal);
 
       if (mounted) {
         setState(() {
@@ -97,6 +99,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         });
       }
     });
+  }
+
+  void _logCacheDiagnostics(List<Map<String, dynamic>> emps) {
+    int withEmbedding = emps.where((e) => e['faceEmbedding'] != null && (e['faceEmbedding'] as List).isNotEmpty).length;
+    int dim = withEmbedding > 0 ? (emps.first['faceEmbedding'] as List).length : 0;
+    debugPrint('=== LOCAL_FACE_CACHE_DIAGNOSTICS ===');
+    debugPrint('businessId=${widget.businessId}');
+    debugPrint('employeesLoaded=${emps.length}');
+    debugPrint('employeesWithEmbedding=$withEmbedding');
+    debugPrint('embeddingDimensions=$dim');
+    debugPrint('====================================');
   }
 
   Future<void> _initServicesAndCamera() async {
@@ -240,7 +253,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     });
 
     try {
-      List<double>? targetVector = await _faceService.processFaceFromBytes(bytes, tempPath);
+      List<double>? targetVector = await _faceService.processFaceFromBytes(
+        bytes,
+        tempPath,
+        context: 'KIOSK',
+      );
 
       if (targetVector == null || targetVector.isEmpty) {
         debugPrint('Face vector extraction returned empty, skipping frame...');

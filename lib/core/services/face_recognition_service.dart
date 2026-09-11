@@ -34,9 +34,15 @@ class FaceRecognitionService {
       _isInitialized = true;
       final inputTensor = _tfliteInterpreter!.getInputTensor(0);
       final outputTensor = _tfliteInterpreter!.getOutputTensor(0);
-      debugPrint('✅ TFLite MobileFaceNet Interpreter Loaded Successfully:');
-      debugPrint('   - Input Tensor Shape: ${inputTensor.shape}, Type: ${inputTensor.type}');
-      debugPrint('   - Output Tensor Shape: ${outputTensor.shape}, Type: ${outputTensor.type}');
+
+      debugPrint('=== FACE_MODEL_DIAGNOSTICS ===');
+      debugPrint('inputShape=${inputTensor.shape}');
+      debugPrint('inputType=${inputTensor.type}');
+      debugPrint('inputQuantization=${inputTensor.params}');
+      debugPrint('outputShape=${outputTensor.shape}');
+      debugPrint('outputType=${outputTensor.type}');
+      debugPrint('outputQuantization=${outputTensor.params}');
+      debugPrint('==============================');
     } catch (e) {
       debugPrint('❌ Error initializing MobileFaceNet TFLite interpreter: $e');
     }
@@ -94,34 +100,147 @@ class FaceRecognitionService {
   }
 
   /// Process raw image bytes & path, detect face, crop face ROI, and extract 128D embedding
-  Future<List<double>?> processFaceFromBytes(Uint8List bytes, String tempFilePath) async {
+  Future<Map<String, dynamic>> processFaceFromBytesDetailed({
+    required Uint8List bytes,
+    required String tempFilePath,
+    String context = 'ENROLLMENT',
+    String employeeId = 'N/A',
+  }) async {
     await initialize();
-    try {
-      final inputImage = InputImage.fromFilePath(tempFilePath);
-      final faces = await detectFaces(inputImage);
 
-      final decoded = img.decodeImage(bytes);
-      if (decoded == null) return null;
+    final inputImage = InputImage.fromFilePath(tempFilePath);
+    final faces = await detectFaces(inputImage);
 
-      if (faces.isEmpty) {
-        debugPrint('No face detected in ML Kit scan, skipping embedding extraction.');
-        return null;
-      }
-
-      final face = faces.first;
-      final boundingBox = face.boundingBox;
-
-      int x = boundingBox.left.toInt().clamp(0, decoded.width - 1);
-      int y = boundingBox.top.toInt().clamp(0, decoded.height - 1);
-      int w = boundingBox.width.toInt().clamp(1, decoded.width - x);
-      int h = boundingBox.height.toInt().clamp(1, decoded.height - y);
-
-      final croppedFace = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
-      return extractEmbedding(croppedFace);
-    } catch (e) {
-      debugPrint('Error processing face embedding: $e');
-      return null;
+    img.Image? decoded = img.decodeImage(bytes);
+    if (decoded == null) {
+      return {
+        'success': false,
+        'error': 'Image decoding failed',
+        'embedding': null,
+      };
     }
+
+    // Step 4: Bake EXIF orientation so pixel layout matches ML Kit coordinate system
+    decoded = img.bakeOrientation(decoded);
+
+    final int imgW = decoded.width;
+    final int imgH = decoded.height;
+
+    if (faces.isEmpty) {
+      debugPrint('=== FACE_${context}_DIAGNOSTICS ===');
+      debugPrint('employeeId=$employeeId');
+      debugPrint('imageWidth=$imgW');
+      debugPrint('imageHeight=$imgH');
+      debugPrint('imageRotation=0');
+      debugPrint('facesDetected=0');
+      debugPrint('faceBoundingBox=null');
+      debugPrint('faceWidth=0');
+      debugPrint('faceHeight=0');
+      debugPrint('cropWidth=0');
+      debugPrint('cropHeight=0');
+      debugPrint('embeddingLength=0');
+      debugPrint('embeddingNorm=0.0');
+      debugPrint('embeddingValid=false');
+      debugPrint('====================================');
+
+      return {
+        'success': false,
+        'error': 'No face detected',
+        'facesDetected': 0,
+        'embedding': null,
+      };
+    }
+
+    if (faces.length > 1) {
+      debugPrint('=== FACE_${context}_DIAGNOSTICS ===');
+      debugPrint('employeeId=$employeeId');
+      debugPrint('imageWidth=$imgW');
+      debugPrint('imageHeight=$imgH');
+      debugPrint('imageRotation=0');
+      debugPrint('facesDetected=${faces.length}');
+      debugPrint('embeddingValid=false (Multiple faces detected)');
+      debugPrint('====================================');
+
+      return {
+        'success': false,
+        'error': 'Multiple faces detected (${faces.length})',
+        'facesDetected': faces.length,
+        'embedding': null,
+      };
+    }
+
+    final face = faces.first;
+    final boundingBox = face.boundingBox;
+
+    // Crop calculation with safety clamping
+    int x = boundingBox.left.toInt().clamp(0, imgW - 1);
+    int y = boundingBox.top.toInt().clamp(0, imgH - 1);
+    int w = boundingBox.width.toInt().clamp(1, imgW - x);
+    int h = boundingBox.height.toInt().clamp(1, imgH - y);
+
+    final croppedFace = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
+    final embedding = extractEmbedding(croppedFace);
+
+    bool isValid = false;
+    double norm = 0.0;
+
+    if (embedding != null && embedding.length == 128) {
+      norm = _calculateL2Norm(embedding);
+      bool allFinite = embedding.every((v) => !v.isNaN && !v.isInfinite);
+      isValid = norm > 0 && allFinite;
+    }
+
+    debugPrint('=== FACE_${context}_DIAGNOSTICS ===');
+    debugPrint('employeeId=$employeeId');
+    debugPrint('imageWidth=$imgW');
+    debugPrint('imageHeight=$imgH');
+    debugPrint('imageRotation=0');
+    debugPrint('facesDetected=1');
+    debugPrint('faceBoundingBox=$boundingBox');
+    debugPrint('faceWidth=${boundingBox.width.toInt()}');
+    debugPrint('faceHeight=${boundingBox.height.toInt()}');
+    debugPrint('cropWidth=$w');
+    debugPrint('cropHeight=$h');
+    debugPrint('embeddingLength=${embedding?.length ?? 0}');
+    debugPrint('embeddingNorm=${norm.toStringAsFixed(6)}');
+    debugPrint('embeddingValid=$isValid');
+    debugPrint('====================================');
+
+    if (!isValid || embedding == null) {
+      return {
+        'success': false,
+        'error': 'Invalid embedding generated',
+        'facesDetected': 1,
+        'embedding': null,
+      };
+    }
+
+    return {
+      'success': true,
+      'facesDetected': 1,
+      'embedding': embedding,
+      'cropWidth': w,
+      'cropHeight': h,
+    };
+  }
+
+  /// Simple convenience wrapper for processFaceFromBytesDetailed
+  Future<List<double>?> processFaceFromBytes(
+    Uint8List bytes,
+    String tempFilePath, {
+    String context = 'GENERIC',
+    String employeeId = 'N/A',
+  }) async {
+    final res = await processFaceFromBytesDetailed(
+      bytes: bytes,
+      tempFilePath: tempFilePath,
+      context: context,
+      employeeId: employeeId,
+    );
+    if (res['success'] == true && res['embedding'] != null) {
+      return res['embedding'] as List<double>;
+    }
+    return null;
   }
 
   // Generate 128D Face Feature Vector Embedding from a cropped face image
@@ -156,19 +275,44 @@ class FaceRecognitionService {
     // Run MobileFaceNet inference
     _tfliteInterpreter!.run(input, output);
 
-    List<double> embedding = List<double>.from(output[0]);
+    List<double> rawEmbedding = List<double>.from(output[0]);
 
     // Normalize output vector L2
-    return _normalize(embedding);
+    final normalizedEmbedding = _normalize(rawEmbedding);
+
+    // Step 6: Embedding Quality Check & Stats Logging
+    final double norm = _calculateL2Norm(normalizedEmbedding);
+    final double minVal = normalizedEmbedding.reduce(min);
+    final double maxVal = normalizedEmbedding.reduce(max);
+    final double sumVal = normalizedEmbedding.reduce((a, b) => a + b);
+    final double meanVal = sumVal / normalizedEmbedding.length;
+    final bool isFinite = normalizedEmbedding.every((v) => !v.isNaN && !v.isInfinite);
+    final bool valid = normalizedEmbedding.length == 128 && norm > 0 && isFinite;
+
+    debugPrint('=== FACE_EMBEDDING_QUALITY ===');
+    debugPrint('embeddingLength=${normalizedEmbedding.length}');
+    debugPrint('L2Norm=${norm.toStringAsFixed(6)}');
+    debugPrint('minValue=${minVal.toStringAsFixed(6)}');
+    debugPrint('maxValue=${maxVal.toStringAsFixed(6)}');
+    debugPrint('mean=${meanVal.toStringAsFixed(6)}');
+    debugPrint('embeddingValid=$valid');
+    debugPrint('=============================');
+
+    if (!valid) return null;
+    return normalizedEmbedding;
   }
 
-  // L2 Normalization
-  List<double> _normalize(List<double> v) {
+  double _calculateL2Norm(List<double> v) {
     double sum = 0.0;
     for (var x in v) {
       sum += x * x;
     }
-    double norm = sqrt(sum);
+    return sqrt(sum);
+  }
+
+  // L2 Normalization
+  List<double> _normalize(List<double> v) {
+    double norm = _calculateL2Norm(v);
     if (norm == 0) return v;
     return v.map((x) => x / norm).toList();
   }
@@ -199,8 +343,17 @@ class FaceRecognitionService {
     Map<String, dynamic>? bestMatchEmpData;
     double highestScore = -1.0;
 
+    debugPrint('=== FACE_MATCH_DIAGNOSTICS ===');
+    debugPrint('targetEmbeddingLength=${targetEmbedding.length}');
+    debugPrint('enrolledEmployeeCount=${enrolledEmployees.length}');
+
     for (var emp in enrolledEmployees) {
-      if (emp['faceEmbedding'] == null) continue;
+      final empId = emp['employeeId'] ?? emp['empId'] ?? 'UNKNOWN';
+      if (emp['faceEmbedding'] == null) {
+        debugPrint('employee=$empId embeddingLength=0 similarity=0.0000 (NULL)');
+        continue;
+      }
+
       List<double> embedding = [];
       try {
         final rawList = emp['faceEmbedding'] as List;
@@ -209,21 +362,34 @@ class FaceRecognitionService {
         debugPrint('Error casting faceEmbedding for ${emp['fullName']}: $e');
         continue;
       }
-      if (embedding.isEmpty) continue;
+
+      // Step 7: Check dimension match before calculating similarity
+      if (embedding.length != targetEmbedding.length) {
+        debugPrint('employee=$empId embeddingLength=${embedding.length} similarity=0.0000 (DIMENSION_MISMATCH)');
+        continue;
+      }
 
       final score = calculateCosineSimilarity(targetEmbedding, embedding);
-      debugPrint('🔍 Comparing Face with "${emp['fullName']}": Score = ${score.toStringAsFixed(4)} | Threshold = $threshold');
+      debugPrint('employee=$empId name="${emp['fullName']}" embeddingLength=${embedding.length} similarity=${score.toStringAsFixed(4)}');
 
       if (score > highestScore) {
         highestScore = score;
-        bestMatchEmployeeId = emp['employeeId'];
+        bestMatchEmployeeId = empId;
         bestMatchName = emp['fullName'];
         bestMatchEmpData = emp;
       }
     }
 
-    if (highestScore >= threshold && bestMatchEmployeeId != null) {
-      debugPrint('✓ SUCCESSFUL FACE MATCH: $bestMatchName (Score: ${highestScore.toStringAsFixed(4)})');
+    final bool pass = highestScore >= threshold && bestMatchEmployeeId != null;
+
+    debugPrint('BEST_MATCH:');
+    debugPrint('employeeId=${bestMatchEmployeeId ?? "NONE"}');
+    debugPrint('similarity=${highestScore > -1.0 ? highestScore.toStringAsFixed(4) : "0.0000"}');
+    debugPrint('threshold=$threshold');
+    debugPrint('result=${pass ? "PASS" : "FAIL"}');
+    debugPrint('==============================');
+
+    if (pass) {
       return {
         'employeeId': bestMatchEmployeeId,
         'employeeName': bestMatchName,
@@ -232,8 +398,34 @@ class FaceRecognitionService {
       };
     }
 
-    debugPrint('❌ NO MATCH FOUND (Highest Score: ${highestScore.toStringAsFixed(4)} < Threshold: $threshold)');
     return null; // Unknown / No Match
+  }
+
+  /// Step 8: Same-Person / Different-Person Diagnostic Self Test Helper
+  Map<String, dynamic> runSelfDiagnosticTest({
+    required List<double> sampleA,
+    required List<double> sampleB,
+    List<double>? differentPersonSample,
+  }) {
+    final double samePersonScore = calculateCosineSimilarity(sampleA, sampleB);
+    final double? diffPersonScore = differentPersonSample != null
+        ? calculateCosineSimilarity(sampleA, differentPersonSample)
+        : null;
+
+    debugPrint('=== SAME_PERSON_SELF_TEST ===');
+    debugPrint('samePersonSimilarity=${samePersonScore.toStringAsFixed(4)}');
+    if (diffPersonScore != null) {
+      debugPrint('differentPersonSimilarity=${diffPersonScore.toStringAsFixed(4)}');
+      debugPrint('margin=${(samePersonScore - diffPersonScore).toStringAsFixed(4)}');
+    }
+    debugPrint('testPass=${samePersonScore > 0.60 && (diffPersonScore == null || samePersonScore > diffPersonScore)}');
+    debugPrint('=============================');
+
+    return {
+      'samePersonScore': samePersonScore,
+      'diffPersonScore': diffPersonScore,
+      'isPass': samePersonScore > 0.60 && (diffPersonScore == null || samePersonScore > diffPersonScore),
+    };
   }
 
   void dispose() {
