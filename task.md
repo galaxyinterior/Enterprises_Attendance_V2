@@ -44,13 +44,13 @@
 - [x] Master Panel Business Approval State Machine (`PENDING` -> `APPROVED` / `REJECTED` -> `ACTIVE` / `PAUSED`)
 
 ## Phase 8: Leave, Advance Salary & Voice Announcements Engine
-- [ ] Leave request approval workflow & Advance Salary logs
-- [ ] Voice Announcements (TTS) for Check-In, Late Arrival, Shift Alert, Emergency Panic
+- [x] Leave request approval workflow & Advance Salary logs
+- [x] Voice Announcements (TTS) for Check-In, Late Arrival, Shift Alert, Emergency Panic
 
 ## Phase 9: Production Security Hardening & End-to-End Testing
-- [ ] Enforce Firestore Security Rules & Storage Rules
-- [ ] E2E Testing (Offline Kiosk -> Local Recognition -> SQLite Queue -> Auto Sync -> Admin View)
-- [ ] `flutter analyze` 0 errors verification
+- [x] Enforce Firestore Security Rules & Storage Rules
+- [x] E2E Testing (Offline Kiosk -> Local Recognition -> SQLite Queue -> Auto Sync -> Admin View)
+- [x] `flutter analyze` 0 errors verification
 
 ## Phase 10: Production Release & Deployment
 - [ ] Build release APK (`flutter build apk`)
