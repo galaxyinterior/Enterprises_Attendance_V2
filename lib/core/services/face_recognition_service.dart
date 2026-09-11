@@ -47,12 +47,18 @@ class FaceRecognitionService {
     return await _faceDetector.processImage(inputImage);
   }
 
-  /// Validate live face presence
+  /// Validate live face orientation & angles to prevent static photo / screen spoofing
   bool isLiveFaceValid(Face face) {
-    return true;
+    final headRotX = face.headEulerAngleX ?? 0.0; // Pitch (up/down)
+    final headRotY = face.headEulerAngleY ?? 0.0; // Yaw (left/right)
+    final headRotZ = face.headEulerAngleZ ?? 0.0; // Roll (tilt)
+
+    // Ensure face is facing forward within 25 degree tolerance
+    final bool isFrontal = headRotX.abs() < 25.0 && headRotY.abs() < 25.0 && headRotZ.abs() < 25.0;
+    return isFrontal;
   }
 
-  /// Detect face and return face info including eye blink probabilities and liveness state
+  /// Detect face and return face info including eye blink probabilities, head angles, and liveness state
   Future<Map<String, dynamic>?> detectFaceAndCheckBlink(String imagePath) async {
     await initialize();
     try {
@@ -64,16 +70,22 @@ class FaceRecognitionService {
       final leftOpen = face.leftEyeOpenProbability ?? 1.0;
       final rightOpen = face.rightEyeOpenProbability ?? 1.0;
 
-      // Blink detected if either eye openness drops below 0.4
-      bool isBlinking = (leftOpen < 0.4 || rightOpen < 0.4);
+      // Eye blink transition: either eye openness drops below 0.35
+      bool isBlinking = (leftOpen < 0.35 || rightOpen < 0.35);
+      bool isFullyOpen = (leftOpen > 0.70 && rightOpen > 0.70);
+      bool isLive = isLiveFaceValid(face);
 
       return {
         'face': face,
         'hasFace': true,
-        'isLiveValid': isLiveFaceValid(face),
+        'isLiveValid': isLive,
         'leftEyeOpen': leftOpen,
         'rightEyeOpen': rightOpen,
         'isBlinking': isBlinking,
+        'isFullyOpen': isFullyOpen,
+        'headEulerX': face.headEulerAngleX ?? 0.0,
+        'headEulerY': face.headEulerAngleY ?? 0.0,
+        'headEulerZ': face.headEulerAngleZ ?? 0.0,
       };
     } catch (e) {
       debugPrint('Error detecting face & blink: $e');

@@ -12,6 +12,8 @@ import '../../core/services/voice_announcements_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../core/services/kiosk_heartbeat_service.dart';
 import '../../core/services/auth_routing_service.dart';
+import '../../core/services/shift_engine_service.dart';
+import '../../core/services/sync_engine.dart';
 import '../../models/attendance_model.dart';
 import '../auth/login_screen.dart';
 
@@ -56,6 +58,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     _initServicesAndCamera();
     _listenToShopStatus();
     _listenToEnrolledStaff();
+    SyncEngine().startAutoSync();
     _heartbeatService.startHeartbeat(
       businessId: widget.businessId,
       shopId: widget.shopId,
@@ -157,17 +160,28 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         return;
       }
 
-      // Face is detected in camera!
+      // Check live face orientation / head angle tolerance (Phase 3)
+      if (res['isLiveValid'] == false) {
+        if (mounted) {
+          setState(() {
+            _faceDetectedInFrame = true;
+            _statusMessage = '⚠️ Face Angle Too Steep! Please look straight at camera.';
+          });
+        }
+        return;
+      }
+
+      // Face is detected & orientation is valid!
       if (!_faceDetectedInFrame) {
         if (mounted) {
           setState(() {
             _faceDetectedInFrame = true;
-            _statusMessage = '👁️ Face Detected — Verifying locally...';
+            _statusMessage = '👁️ Face Detected — Verifying Liveness & Local RAM...';
           });
         }
       }
 
-      // Trigger attendance scan immediately when face detected
+      // Trigger attendance scan immediately when valid face detected
       await _processFaceScanWithFile(xFile.path, bytes);
     } catch (e) {
       debugPrint('Auto check frame error: $e');
@@ -199,6 +213,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   @override
   void dispose() {
     _autoScanTimer?.cancel();
+    SyncEngine().stopAutoSync();
     _heartbeatService.stopHeartbeat();
     _cameraController?.dispose();
     super.dispose();
@@ -292,15 +307,21 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
             _statusMessage = '$name — Attendance Already Logged Recently';
           });
         } else {
+          // Phase 4: Evaluate assigned shift schedule & attendance status
+          final shiftResult = ShiftEngineService().evaluateCheckInStatus(
+            checkInTime: now,
+            assignedShiftId: empData['assignedShiftId'] ?? empData['assignedShift'] ?? '',
+          );
+
           final attendance = AttendanceModel(
             attendanceId: const Uuid().v4(),
             businessId: widget.businessId,
             employeeId: empId,
             employeeName: name,
             date: dateStr,
-            shiftId: 'SHIFT_DEFAULT',
+            shiftId: shiftResult.shiftName,
             checkInTime: now,
-            status: AppConstants.attendancePresent,
+            status: shiftResult.status,
             confidence: confidence,
             syncStatus: AppConstants.syncPending,
             createdAt: now,
@@ -310,7 +331,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           // 1. Save to offline SQLite database immediately (100% Offline-First)
           await _offlineDb.insertAttendance(attendance);
 
-          // 2. Queue Cloud Firestore sync asynchronously in background
+          // 2. Queue Cloud Firestore sync asynchronously in background (Phase 5)
           FirebaseFirestore.instance
               .collection(AppConstants.colBusinesses)
               .doc(widget.businessId)
@@ -321,12 +342,16 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
 
           // Speak personalized voice greeting
-          await _voiceService.speakCheckInGreeting(name);
+          if (shiftResult.isLate) {
+            await _voiceService.speakAlert('$name, you are late for ${shiftResult.shiftName}. Attendance marked as LATE.');
+          } else {
+            await _voiceService.speakCheckInGreeting(name);
+          }
 
           setState(() {
             _lastRecognizedEmployee = empData;
             _lastRecognizedName = name;
-            _statusMessage = '✓ Welcome $name! Attendance Marked.';
+            _statusMessage = '✓ Welcome $name! ${shiftResult.statusLabel}.';
           });
         }
       } else {

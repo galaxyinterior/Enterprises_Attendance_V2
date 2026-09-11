@@ -19,19 +19,19 @@
 - [x] Fast in-memory cosine similarity matching against local RAM cache
 
 ## Phase 3: Liveness & Anti-Spoofing Verification
-- [ ] Eye-blink transition detection (`leftEyeOpenProbability` / `rightEyeOpenProbability` dip < 0.35 -> open > 0.70)
-- [ ] Live head orientation / angle validation
-- [ ] Visual Eye-Blink instruction pill UI (`👁️ Please Blink Your Eyes to Confirm`)
+- [x] Eye-blink transition detection (`leftEyeOpenProbability` / `rightEyeOpenProbability` dip < 0.35 -> open > 0.70)
+- [x] Live head orientation / angle validation
+- [x] Visual Eye-Blink instruction pill UI (`👁️ Position Face & Blink Eyes to Confirm`)
 
 ## Phase 4: Shift Engine & Attendance Rules Validation
-- [ ] Shift timing window validation (Morning / Evening / Night / General Shift)
-- [ ] Status classification (`PRESENT`, `LATE`, `EARLY_CHECKOUT`, `HALF_DAY`)
-- [ ] 5-minute duplicate check-in buffer safeguard
+- [x] Shift timing window validation (Morning / Evening / Night / General Shift)
+- [x] Status classification (`PRESENT`, `LATE`, `EARLY_CHECKOUT`, `HALF_DAY`)
+- [x] 5-minute duplicate check-in buffer safeguard
 
 ## Phase 5: Offline SQLite Queue & Background Idempotent Sync
-- [ ] Offline queue persistence in SQLite with `syncStatus: PENDING`
-- [ ] Background network listener for auto-syncing pending attendance to Cloud Firestore
-- [ ] Idempotent Firestore set using `attendanceId` UUID key
+- [x] Offline queue persistence in SQLite with `syncStatus: PENDING`
+- [x] Background network listener for auto-syncing pending attendance to Cloud Firestore
+- [x] Idempotent Firestore set using `attendanceId` UUID key
 
 ## Phase 6: Admin Panel Management & Real Data Integration
 - [ ] 100% Real Firestore Data Binding for Staff Directory CRUD

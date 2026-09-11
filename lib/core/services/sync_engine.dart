@@ -13,15 +13,26 @@ class SyncEngine {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final OfflineDbService _offlineDb = OfflineDbService();
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _periodicSyncTimer;
   bool _isSyncing = false;
 
   void startAutoSync() {
     _connectivitySubscription?.cancel();
+    _periodicSyncTimer?.cancel();
+
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
       if (results.any((res) => res != ConnectivityResult.none)) {
         syncPendingAttendance();
       }
     });
+
+    // Periodic background sync fallback every 30 seconds
+    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      syncPendingAttendance();
+    });
+
+    // Initial sync trigger
+    syncPendingAttendance();
   }
 
   // Push pending SQLite attendance logs to Cloud Firestore
@@ -71,5 +82,6 @@ class SyncEngine {
 
   void stopAutoSync() {
     _connectivitySubscription?.cancel();
+    _periodicSyncTimer?.cancel();
   }
 }
