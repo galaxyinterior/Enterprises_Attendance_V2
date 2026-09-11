@@ -2,7 +2,6 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'dart:convert';
 import '../../models/attendance_model.dart';
-import '../../models/employee_model.dart';
 
 class OfflineDbService {
   static final OfflineDbService _instance = OfflineDbService._internal();
