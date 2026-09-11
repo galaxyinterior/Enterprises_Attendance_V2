@@ -1,12 +1,15 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
+import 'package:camera/camera.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/face_recognition_service.dart';
 import '../../core/services/voice_announcements_service.dart';
 import '../../core/services/offline_db_service.dart';
+import '../../core/services/kiosk_heartbeat_service.dart';
 import '../../models/attendance_model.dart';
 import '../auth/login_screen.dart';
 
@@ -28,22 +31,58 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   final _faceService = FaceRecognitionService();
   final _voiceService = VoiceAnnouncementsService();
   final _offlineDb = OfflineDbService();
+  final _heartbeatService = KioskHeartbeatService();
+
+  CameraController? _cameraController;
+  List<CameraDescription> _cameras = [];
+  bool _isCameraInitialized = false;
 
   bool _isProcessing = false;
-  String _statusMessage = 'Please look at the camera';
+  String _statusMessage = 'Align face in camera circle to scan';
   String? _lastRecognizedName;
   bool _isShopPaused = false;
+  final String _deviceId = 'KSK-01';
 
   @override
   void initState() {
     super.initState();
-    _initServices();
+    _initServicesAndCamera();
     _listenToShopStatus();
+    _heartbeatService.startHeartbeat(
+      businessId: widget.businessId,
+      shopId: widget.shopId,
+      deviceId: _deviceId,
+    );
   }
 
-  void _initServices() async {
+  Future<void> _initServicesAndCamera() async {
     await _faceService.initialize();
     await _voiceService.initialize();
+
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isNotEmpty) {
+        final frontCam = _cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.front,
+          orElse: () => _cameras.first,
+        );
+
+        _cameraController = CameraController(
+          frontCam,
+          ResolutionPreset.medium,
+          enableAudio: false,
+        );
+
+        await _cameraController!.initialize();
+        if (mounted) {
+          setState(() {
+            _isCameraInitialized = true;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Kiosk camera init info: $e');
+    }
   }
 
   void _listenToShopStatus() {
@@ -61,93 +100,139 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     });
   }
 
-  // Simulated face scan trigger for testing face matching & attendance log creation
-  void _simulateFaceScan() async {
+  @override
+  void dispose() {
+    _heartbeatService.stopHeartbeat();
+    _cameraController?.dispose();
+    super.dispose();
+  }
+
+  // Trigger Real Face Scan & Recognition from live camera or image capture
+  Future<void> _processFaceScan() async {
     if (_isShopPaused || _isProcessing) return;
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = 'Scanning & Extracting Face Features...';
+      _statusMessage = 'Scanning face & matching features...';
     });
 
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      Uint8List bytes = Uint8List(0);
+      String tempPath = '';
 
-    // Simulated 128D embedding vector
-    final targetVector = List.generate(128, (i) => (i % 2 == 0 ? 0.05 : -0.05));
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        final xFile = await _cameraController!.takePicture();
+        bytes = await xFile.readAsBytes();
+        tempPath = xFile.path;
+      }
 
-    // Fetch real enrolled staff with face embeddings from Firestore
-    final snapshot = await FirebaseFirestore.instance
-        .collection(AppConstants.colBusinesses)
-        .doc(widget.businessId)
-        .collection(AppConstants.colEmployees)
-        .where('faceEnrollmentStatus', isEqualTo: true)
-        .get();
+      List<double>? targetVector;
+      if (tempPath.isNotEmpty && bytes.isNotEmpty) {
+        targetVector = await _faceService.processFaceFromBytes(bytes, tempPath);
+      }
 
-    List<Map<String, dynamic>> enrolled = snapshot.docs.map((doc) => doc.data()).toList();
+      if (targetVector == null) {
+        await _voiceService.speakAlert('Face position unclear or quality low. Look directly at camera.');
+        setState(() {
+          _statusMessage = 'Face Quality Low — Retype/Look Frontal';
+        });
+        await Future.delayed(const Duration(seconds: 2));
+        return;
+      }
 
-    // Fallback default list if no staff enrolled in DB yet
-    if (enrolled.isEmpty) {
-      enrolled = [
-        {
-          'employeeId': 'EMP123',
-          'fullName': 'Ravi Kumar',
-          'faceEmbedding': List.generate(128, (i) => (i % 2 == 0 ? 0.05 : -0.05)),
-        }
-      ];
-    }
+      // Fetch real enrolled staff exclusively from Firestore
+      final snapshot = await FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .collection(AppConstants.colEmployees)
+          .where('active', isEqualTo: true)
+          .where('faceEnrollmentStatus', isEqualTo: true)
+          .get();
 
-    final match = _faceService.matchFace(
-      targetEmbedding: targetVector,
-      enrolledEmployees: enrolled,
-    );
+      final List<Map<String, dynamic>> enrolled = snapshot.docs.map((doc) => doc.data()).toList();
 
-    if (match != null) {
-      final name = match['employeeName'];
-      final empId = match['employeeId'];
+      if (enrolled.isEmpty) {
+        await _voiceService.speakAlert('No enrolled staff found for this business.');
+        setState(() {
+          _statusMessage = 'No Enrolled Staff in Database';
+        });
+        await Future.delayed(const Duration(seconds: 2));
+        return;
+      }
 
-      final now = DateTime.now();
-      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-
-      final attendance = AttendanceModel(
-        attendanceId: const Uuid().v4(),
-        businessId: widget.businessId,
-        employeeId: empId,
-        employeeName: name,
-        date: dateStr,
-        shiftId: 'SHIFT_MORNING',
-        checkInTime: now,
-        status: AppConstants.attendancePresent,
-        confidence: match['confidence'],
-        syncStatus: AppConstants.syncPending,
-        createdAt: now,
-        updatedAt: now,
+      final match = _faceService.matchFace(
+        targetEmbedding: targetVector,
+        enrolledEmployees: enrolled,
       );
 
-      // Save to offline SQLite Queue
-      await _offlineDb.insertAttendance(attendance);
+      if (match != null) {
+        final String empId = match['employeeId'];
+        final String name = match['employeeName'];
+        final double confidence = match['confidence'];
 
-      // Speak Greeting TTS
-      await _voiceService.speakCheckInGreeting(name);
+        final now = DateTime.now();
+        final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
+        // Check for 5-minute duplicate attendance safeguard
+        final isDuplicate = await _offlineDb.hasRecentAttendance(empId, dateStr);
+        if (isDuplicate) {
+          await _voiceService.speakAlert('$name, your attendance was already logged recently.');
+          setState(() {
+            _statusMessage = '$name — Attendance Already Logged Recently';
+          });
+        } else {
+          final attendance = AttendanceModel(
+            attendanceId: const Uuid().v4(),
+            businessId: widget.businessId,
+            employeeId: empId,
+            employeeName: name,
+            date: dateStr,
+            shiftId: 'SHIFT_DEFAULT',
+            checkInTime: now,
+            status: AppConstants.attendancePresent,
+            confidence: confidence,
+            syncStatus: AppConstants.syncPending,
+            createdAt: now,
+            updatedAt: now,
+          );
+
+          // Save to offline SQLite database & Cloud Firestore
+          await _offlineDb.insertAttendance(attendance);
+          await FirebaseFirestore.instance
+              .collection(AppConstants.colBusinesses)
+              .doc(widget.businessId)
+              .collection(AppConstants.colAttendance)
+              .doc(attendance.attendanceId)
+              .set(attendance.toMap());
+
+          // Speak personalized voice greeting
+          await _voiceService.speakCheckInGreeting(name);
+
+          setState(() {
+            _lastRecognizedName = name;
+            _statusMessage = '✓ Welcome $name! Attendance Marked.';
+          });
+        }
+      } else {
+        await _voiceService.speakAlert('Face not recognized. Please try again.');
+        setState(() {
+          _statusMessage = 'Face Not Recognized (No Match Found)';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error in kiosk scan: $e');
       setState(() {
-        _lastRecognizedName = name;
-        _statusMessage = 'Welcome $name! Attendance Marked.';
+        _statusMessage = 'Error scanning face. Please try again.';
       });
-    } else {
-      await _voiceService.speakAlert('Face not recognized. Please try again.');
-      setState(() {
-        _statusMessage = 'Face Not Recognized';
-      });
-    }
-
-    await Future.delayed(const Duration(seconds: 3));
-
-    if (mounted) {
-      setState(() {
-        _isProcessing = false;
-        _lastRecognizedName = null;
-        _statusMessage = 'Please look at the camera';
-      });
+    } finally {
+      await Future.delayed(const Duration(seconds: 3));
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _lastRecognizedName = null;
+          _statusMessage = 'Align face in camera circle to scan';
+        });
+      }
     }
   }
 
@@ -168,7 +253,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Enter 4-digit Admin PIN to exit device kiosk mode:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13)),
+              Text('Enter Admin Security PIN to exit kiosk mode:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13)),
               const SizedBox(height: 12),
               TextField(
                 controller: pinCtrl,
@@ -196,7 +281,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
               onPressed: () {
                 final pin = pinCtrl.text.trim();
-                // Validate admin PIN (Default 1234 or shop PIN)
                 if (pin == '1234' || pin.length >= 4) {
                   Navigator.pop(context);
                   Navigator.of(context).pushReplacement(
@@ -204,7 +288,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                   );
                 } else {
                   setModalState(() {
-                    errorMsg = 'Incorrect Admin PIN. Try default (1234)';
+                    errorMsg = 'Incorrect Security PIN';
                   });
                 }
               },
@@ -222,19 +306,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
       backgroundColor: AppColors.bgDark,
       body: Stack(
         children: [
-          // Camera / Scanner Background Area
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Shop Name Header
                 Text(
                   'SHOP KIOSK: ${widget.shopId}',
                   style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _isShopPaused ? '⚠️ SERVICE TEMPORARILY PAUSED BY ADMIN' : 'SMART ATTENDANCE SCANNER ACTIVE',
+                  _isShopPaused ? '⚠️ SERVICE TEMPORARILY PAUSED BY MASTER ADMIN' : 'REAL-TIME BIOMETRIC ENTRANCE KIOSK',
                   style: GoogleFonts.inter(
                     fontSize: 14,
                     color: _isShopPaused ? AppColors.haldiGold : AppColors.pannaEmerald,
@@ -243,12 +325,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                 ),
                 const SizedBox(height: 32),
 
-                // Face Scanning Circle Container
+                // Live Camera Circle Scanner
                 GestureDetector(
-                  onTap: _simulateFaceScan,
+                  onTap: _processFaceScan,
                   child: Container(
-                    width: 280,
-                    height: 280,
+                    width: 300,
+                    height: 300,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppColors.cardDark,
@@ -265,14 +347,31 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                         ),
                       ],
                     ),
-                    child: Center(
-                      child: _isProcessing
-                          ? const CircularProgressIndicator(color: AppColors.kesariSaffron)
-                          : Icon(
-                              _lastRecognizedName != null ? Icons.check_circle_rounded : Icons.face_retouching_natural_rounded,
-                              size: 100,
-                              color: _lastRecognizedName != null ? AppColors.pannaEmerald : Colors.white70,
+                    child: ClipOval(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          if (_isCameraInitialized && _cameraController != null)
+                            CameraPreview(_cameraController!)
+                          else
+                            const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.camera_front_rounded, size: 80, color: AppColors.haldiGold),
+                                SizedBox(height: 8),
+                                Text('Live Scanner Active', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                              ],
                             ),
+
+                          if (_isProcessing)
+                            Container(
+                              color: Colors.black45,
+                              child: const Center(
+                                child: CircularProgressIndicator(color: AppColors.kesariSaffron),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -292,15 +391,20 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  '(Tap scanner box to simulate live face recognition)',
-                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.kesariSaffron,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.center_focus_strong_rounded, color: Colors.white),
+                  label: const Text('SCAN FACE NOW', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  onPressed: _isProcessing ? null : _processFaceScan,
                 ),
               ],
             ),
           ),
 
-          // Bottom Bar Status
+          // Bottom Left Heartbeat & Offline Queue Status
           Positioned(
             left: 20,
             bottom: 20,
@@ -308,12 +412,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               children: [
                 const Icon(Icons.cloud_done_rounded, color: AppColors.pannaEmerald, size: 20),
                 const SizedBox(width: 8),
-                Text('Offline Queue Protected | Connected', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
+                Text('Heartbeat Active • Offline Queue Protected', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
               ],
             ),
           ),
 
-          // Top Right Exit Kiosk Button
+          // Top Right Exit Lock Button
           Positioned(
             top: 40,
             right: 20,
@@ -328,4 +432,3 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     );
   }
 }
-
