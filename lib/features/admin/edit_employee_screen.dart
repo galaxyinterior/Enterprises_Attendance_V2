@@ -77,7 +77,7 @@ class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
         : 'Morning Shift (10:00 AM - 06:30 PM)';
 
     _synthesizedFaceEmbedding = widget.employee.faceEmbedding;
-    if (_synthesizedFaceEmbedding != null && _synthesizedFaceEmbedding!.length == 128) {
+    if (_synthesizedFaceEmbedding != null && _synthesizedFaceEmbedding!.isNotEmpty) {
       _currentStep = GuidedEnrollmentStep.completed;
       _faceStatusMessage = '✓ Existing 3D Face Profile Registered (${_synthesizedFaceEmbedding!.length}D)';
     }
@@ -175,7 +175,7 @@ class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
             setState(() {
               _synthesizedFaceEmbedding = synthesized;
               _currentStep = GuidedEnrollmentStep.completed;
-              _faceStatusMessage = '✓ 3D Multi-Angle Face Profile Enrolled Successfully (128D Ready)';
+              _faceStatusMessage = '✓ 3D Multi-Angle Face Profile Enrolled Successfully (${synthesized.length}D Ready)';
             });
           } else {
             setState(() {

@@ -152,7 +152,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
             setState(() {
               _enrolledFaceEmbedding = synthesized;
               _currentStep = GuidedEnrollmentStep.completed;
-              _faceStatusMessage = '✓ 3D Multi-Angle Face Profile Enrolled Successfully (128D Ready)';
+              _faceStatusMessage = '✓ 3D Multi-Angle Face Profile Enrolled Successfully (${synthesized.length}D Ready)';
             });
           } else {
             setState(() {

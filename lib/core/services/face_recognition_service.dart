@@ -13,8 +13,10 @@ class FaceRecognitionService {
   late FaceDetector _faceDetector;
   Interpreter? _tfliteInterpreter;
   bool _isInitialized = false;
+  int _outputDim = 192;
 
   bool get isInitialized => _isInitialized;
+  int get outputDim => _outputDim;
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -35,6 +37,10 @@ class FaceRecognitionService {
       final inputTensor = _tfliteInterpreter!.getInputTensor(0);
       final outputTensor = _tfliteInterpreter!.getOutputTensor(0);
 
+      if (outputTensor.shape.length >= 2) {
+        _outputDim = outputTensor.shape[1];
+      }
+
       debugPrint('=== FACE_MODEL_DIAGNOSTICS ===');
       debugPrint('inputShape=${inputTensor.shape}');
       debugPrint('inputType=${inputTensor.type}');
@@ -42,6 +48,7 @@ class FaceRecognitionService {
       debugPrint('outputShape=${outputTensor.shape}');
       debugPrint('outputType=${outputTensor.type}');
       debugPrint('outputQuantization=${outputTensor.params}');
+      debugPrint('outputDim=$_outputDim');
       debugPrint('==============================');
     } catch (e) {
       debugPrint('❌ Error initializing MobileFaceNet TFLite interpreter: $e');
@@ -184,7 +191,7 @@ class FaceRecognitionService {
     bool isValid = false;
     double norm = 0.0;
 
-    if (embedding != null && embedding.length == 128) {
+    if (embedding != null && embedding.length == _outputDim) {
       norm = _calculateL2Norm(embedding);
       bool allFinite = embedding.every((v) => !v.isNaN && !v.isInfinite);
       isValid = norm > 0 && allFinite;
@@ -269,8 +276,8 @@ class FaceRecognitionService {
       ),
     );
 
-    // Output tensor vector array [1, 128]
-    var output = List.filled(1 * 128, 0.0).reshape([1, 128]);
+    // Output tensor vector array [1, _outputDim]
+    var output = List.filled(1 * _outputDim, 0.0).reshape([1, _outputDim]);
 
     // Run MobileFaceNet inference
     _tfliteInterpreter!.run(input, output);
@@ -287,7 +294,7 @@ class FaceRecognitionService {
     final double sumVal = normalizedEmbedding.reduce((a, b) => a + b);
     final double meanVal = sumVal / normalizedEmbedding.length;
     final bool isFinite = normalizedEmbedding.every((v) => !v.isNaN && !v.isInfinite);
-    final bool valid = normalizedEmbedding.length == 128 && norm > 0 && isFinite;
+    final bool valid = normalizedEmbedding.length == _outputDim && norm > 0 && isFinite;
 
     debugPrint('=== FACE_EMBEDDING_QUALITY ===');
     debugPrint('embeddingLength=${normalizedEmbedding.length}');
@@ -433,11 +440,10 @@ class FaceRecognitionService {
     return face.headEulerAngleY ?? 0.0;
   }
 
-  /// Synthesize multi-pose embeddings (Center, Left, Right) into a single robust 128D vector
+  /// Synthesize multi-pose embeddings (Center, Left, Right) into a single robust vector
   List<double>? synthesizeMultiAngleEmbedding(List<List<double>> embeddings) {
     if (embeddings.isEmpty) return null;
     final int dim = embeddings.first.length;
-    if (dim != 128) return null;
 
     List<double> avgVector = List.filled(dim, 0.0);
     for (var vec in embeddings) {
@@ -454,8 +460,8 @@ class FaceRecognitionService {
     final norm = _calculateL2Norm(normalized);
     final bool isFinite = normalized.every((v) => !v.isNaN && !v.isInfinite);
 
-    if (norm > 0 && isFinite && normalized.length == 128) {
-      debugPrint('✓ Synthesized ${embeddings.length} Multi-Angle Vectors into 128D Embedding (Norm: ${norm.toStringAsFixed(4)})');
+    if (norm > 0 && isFinite && normalized.length == dim) {
+      debugPrint('✓ Synthesized ${embeddings.length} Multi-Angle Vectors into ${dim}D Embedding (Norm: ${norm.toStringAsFixed(4)})');
       return normalized;
     }
     return null;
