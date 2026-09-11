@@ -129,7 +129,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
   void _startAutoScanner() {
     _autoScanTimer?.cancel();
-    _autoScanTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) async {
+    _autoScanTimer = Timer.periodic(const Duration(milliseconds: 800), (_) async {
       if (!mounted || !_isCameraInitialized || _isProcessing || _isShopPaused || _cameraController == null || !_cameraController!.value.isInitialized) {
         return;
       }
@@ -210,7 +210,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = '⚡ Verifying face in Local Database...';
+      _statusMessage = '⚡ Verifying face in Local RAM Cache...';
     });
 
     try {
@@ -221,17 +221,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         return;
       }
 
-      // Step 1: Perform 100% offline local SQLite memory match
+      // Step 1: Perform 100% offline local SQLite memory match against pre-loaded RAM cache
       var match = _faceService.matchFace(
         targetEmbedding: targetVector,
         enrolledEmployees: _enrolledStaffCache,
       );
 
-      // Step 2: If face NOT found in local DB, log and search Cloud Database
+      // Step 2: If face NOT found in local DB, log and search Cloud Database asynchronously with 3s timeout
       if (match == null) {
-        debugPrint('❌ Face vector not found in Local SQLite DB (${_enrolledStaffCache.length} cached). Searching Cloud Firebase Database...');
+        debugPrint('❌ Face vector not found in Local RAM Cache (${_enrolledStaffCache.length} cached). Searching Cloud Firebase Database...');
         setState(() {
-          _statusMessage = '☁️ Face not in Local DB — Searching Cloud Firebase Database...';
+          _statusMessage = '☁️ Face not in Local DB — Searching Cloud Database...';
         });
 
         try {
@@ -239,7 +239,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               .collection(AppConstants.colBusinesses)
               .doc(widget.businessId)
               .collection(AppConstants.colEmployees)
-              .get();
+              .get()
+              .timeout(const Duration(seconds: 3));
 
           final cloudEmps = snapshot.docs
               .map((doc) => doc.data())
@@ -268,7 +269,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
             }
           }
         } catch (e) {
-          debugPrint('Cloud fallback sync error: $e');
+          debugPrint('Cloud fallback sync info (offline or timeout): $e');
         }
       }
 
@@ -306,14 +307,18 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
             updatedAt: now,
           );
 
-          // Save to offline SQLite database & Cloud Firestore
+          // 1. Save to offline SQLite database immediately (100% Offline-First)
           await _offlineDb.insertAttendance(attendance);
-          await FirebaseFirestore.instance
+
+          // 2. Queue Cloud Firestore sync asynchronously in background
+          FirebaseFirestore.instance
               .collection(AppConstants.colBusinesses)
               .doc(widget.businessId)
               .collection(AppConstants.colAttendance)
               .doc(attendance.attendanceId)
-              .set(attendance.toMap());
+              .set(attendance.toMap())
+              .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
+              .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
 
           // Speak personalized voice greeting
           await _voiceService.speakCheckInGreeting(name);
@@ -328,7 +333,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         await _voiceService.speakAlert('Face not recognized. Please try again.');
         setState(() {
           _lastRecognizedEmployee = null;
-          _statusMessage = 'Face Not Recognized (No Match Found)';
+          _statusMessage = '❌ Face Not Recognized (No Match Found)';
         });
       }
     } catch (e) {
@@ -337,7 +342,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         _statusMessage = 'Error scanning face. Retrying...';
       });
     } finally {
-      await Future.delayed(const Duration(milliseconds: 4500));
+      await Future.delayed(const Duration(milliseconds: 3500));
       if (mounted) {
         setState(() {
           _isProcessing = false;

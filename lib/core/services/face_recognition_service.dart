@@ -91,21 +91,21 @@ class FaceRecognitionService {
       final decoded = img.decodeImage(bytes);
       if (decoded == null) return null;
 
-      if (faces.isNotEmpty) {
-        final face = faces.first;
-        final boundingBox = face.boundingBox;
-
-        int x = boundingBox.left.toInt().clamp(0, decoded.width - 1);
-        int y = boundingBox.top.toInt().clamp(0, decoded.height - 1);
-        int w = boundingBox.width.toInt().clamp(1, decoded.width - x);
-        int h = boundingBox.height.toInt().clamp(1, decoded.height - y);
-
-        final croppedFace = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
-        return extractEmbedding(croppedFace);
-      } else {
-        // Fallback: extract embedding from whole decoded image frame
-        return extractEmbedding(decoded);
+      if (faces.isEmpty) {
+        debugPrint('No face detected in ML Kit scan, skipping embedding extraction.');
+        return null;
       }
+
+      final face = faces.first;
+      final boundingBox = face.boundingBox;
+
+      int x = boundingBox.left.toInt().clamp(0, decoded.width - 1);
+      int y = boundingBox.top.toInt().clamp(0, decoded.height - 1);
+      int w = boundingBox.width.toInt().clamp(1, decoded.width - x);
+      int h = boundingBox.height.toInt().clamp(1, decoded.height - y);
+
+      final croppedFace = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
+      return extractEmbedding(croppedFace);
     } catch (e) {
       debugPrint('Error processing face embedding: $e');
       return null;

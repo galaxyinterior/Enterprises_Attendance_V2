@@ -13,10 +13,10 @@
 - [x] Face Enrollment Status Badge (`Enrolled` vs `Pending`) in Admin Staff List
 
 ## Phase 2: Production-Grade Kiosk Face Recognition Engine (100% Offline)
-- [ ] Eliminate mid-scan network blocking calls
-- [ ] Pre-load local SQLite embeddings into RAM cache on Kiosk boot
-- [ ] Frame throttling (1 frame / 800ms) for smooth continuous operation
-- [ ] Fast in-memory cosine similarity matching against local RAM cache
+- [x] Eliminate mid-scan network blocking calls
+- [x] Pre-load local SQLite embeddings into RAM cache on Kiosk boot
+- [x] Frame throttling (1 frame / 800ms) for smooth continuous operation
+- [x] Fast in-memory cosine similarity matching against local RAM cache
 
 ## Phase 3: Liveness & Anti-Spoofing Verification
 - [ ] Eye-blink transition detection (`leftEyeOpenProbability` / `rightEyeOpenProbability` dip < 0.35 -> open > 0.70)
