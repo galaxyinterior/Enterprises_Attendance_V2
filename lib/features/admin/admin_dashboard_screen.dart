@@ -40,11 +40,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       backgroundColor: AppColors.bgDark,
       appBar: AppBar(
         backgroundColor: AppColors.cardDark,
+        elevation: 2,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('SHOP ADMIN CONSOLE', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
-            Text('Shop ID: ${widget.shopId}', style: GoogleFonts.inter(color: AppColors.textSaffron, fontSize: 12)),
+            Text('Shop ID: ${widget.shopId}', style: GoogleFonts.inter(color: AppColors.textSaffron, fontSize: 12, fontWeight: FontWeight.w600)),
           ],
         ),
         actions: [
@@ -62,44 +63,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
         ],
       ),
-      body: Row(
+
+      // Full Width Tab View Body
+      body: IndexedStack(
+        index: _selectedNavIndex,
         children: [
-          // Sidebar Navigation Rail
-          NavigationRail(
-            backgroundColor: AppColors.cardDark,
-            selectedIndex: _selectedNavIndex,
-            onDestinationSelected: (index) => setState(() => _selectedNavIndex = index),
-            labelType: NavigationRailLabelType.all,
-            selectedIconTheme: const IconThemeData(color: AppColors.kesariSaffron),
-            selectedLabelTextStyle: GoogleFonts.inter(color: AppColors.kesariSaffron, fontWeight: FontWeight.bold),
-            unselectedIconTheme: const IconThemeData(color: AppColors.textMuted),
-            unselectedLabelTextStyle: GoogleFonts.inter(color: AppColors.textMuted),
-            destinations: const [
-              NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), label: Text('Overview')),
-              NavigationRailDestination(icon: Icon(Icons.people_alt_outlined), label: Text('Staff Directory')),
-              NavigationRailDestination(icon: Icon(Icons.schedule_outlined), label: Text('Shifts')),
-              NavigationRailDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: Text('Payroll & Payslips')),
-              NavigationRailDestination(icon: Icon(Icons.devices_other_rounded), label: Text('Kiosks')),
-              NavigationRailDestination(icon: Icon(Icons.campaign_outlined), label: Text('Announcements')),
-            ],
-          ),
-          const VerticalDivider(thickness: 1, width: 1, color: AppColors.cardBorderDark),
-          
-          // Main Content View
-          Expanded(
-            child: IndexedStack(
-              index: _selectedNavIndex,
-              children: [
-                _buildOverviewTab(),
-                _buildStaffDirectoryTab(),
-                _buildShiftsTab(),
-                _buildPayrollUdhaarTab(),
-                _buildKiosksTab(),
-                _buildAnnouncementsTab(),
-              ],
-            ),
-          ),
+          _buildOverviewTab(),
+          _buildStaffDirectoryTab(),
+          _buildPayrollUdhaarTab(),
+          _buildKiosksTab(),
+          _buildAnnouncementsTab(),
         ],
+      ),
+
+      // Premium Bottom Navigation Bar
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.cardDark,
+          border: Border(top: BorderSide(color: AppColors.cardBorderDark, width: 1)),
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _selectedNavIndex,
+          onTap: (index) => setState(() => _selectedNavIndex = index),
+          backgroundColor: AppColors.cardDark,
+          type: BottomNavigationBarType.fixed,
+          selectedItemColor: AppColors.kesariSaffron,
+          unselectedItemColor: AppColors.textMuted,
+          selectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12),
+          unselectedLabelStyle: GoogleFonts.inter(fontSize: 11),
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.dashboard_rounded),
+              activeIcon: Icon(Icons.dashboard_rounded, color: AppColors.kesariSaffron),
+              label: 'Overview',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.people_alt_rounded),
+              activeIcon: Icon(Icons.people_alt_rounded, color: AppColors.kesariSaffron),
+              label: 'Staff',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.account_balance_wallet_rounded),
+              activeIcon: Icon(Icons.account_balance_wallet_rounded, color: AppColors.kesariSaffron),
+              label: 'Payroll',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.devices_other_rounded),
+              activeIcon: Icon(Icons.devices_other_rounded, color: AppColors.kesariSaffron),
+              label: 'Kiosks',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.campaign_rounded),
+              activeIcon: Icon(Icons.campaign_rounded, color: AppColors.kesariSaffron),
+              label: 'Alerts',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -109,14 +128,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Today\'s Attendance Summary', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
           const SizedBox(height: 16),
 
-          // Real Live Firestore Metrics Summary Stream
+          // Real Live Firestore Summary Cards Stream
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection(AppConstants.colBusinesses)
@@ -155,27 +174,54 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                   final absentCount = (totalEmployees - (presentCount + lateCount)).clamp(0, 9999);
 
-                  return Row(
-                    children: [
-                      Expanded(child: _buildSummaryTile('Present Today', '$presentCount', AppColors.pannaEmerald, Icons.check_circle_outline)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildSummaryTile('Late Arrivals', '$lateCount', AppColors.haldiGold, Icons.access_time_rounded)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildSummaryTile('Absent', '$absentCount', AppColors.sindoorRed, Icons.cancel_outlined)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildSummaryTile('Pending Checkout', '$pendingCheckout', AppColors.royalPurple, Icons.exit_to_app_rounded)),
-                    ],
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isMobile = constraints.maxWidth < 600;
+                      if (isMobile) {
+                        return Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(child: _buildSummaryTile('Present Today', '$presentCount', AppColors.pannaEmerald, Icons.check_circle_outline)),
+                                const SizedBox(width: 10),
+                                Expanded(child: _buildSummaryTile('Late Arrivals', '$lateCount', AppColors.haldiGold, Icons.access_time_rounded)),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(child: _buildSummaryTile('Absent', '$absentCount', AppColors.sindoorRed, Icons.cancel_outlined)),
+                                const SizedBox(width: 10),
+                                Expanded(child: _buildSummaryTile('Pending Checkout', '$pendingCheckout', AppColors.royalPurple, Icons.exit_to_app_rounded)),
+                              ],
+                            ),
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        children: [
+                          Expanded(child: _buildSummaryTile('Present Today', '$presentCount', AppColors.pannaEmerald, Icons.check_circle_outline)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _buildSummaryTile('Late Arrivals', '$lateCount', AppColors.haldiGold, Icons.access_time_rounded)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _buildSummaryTile('Absent', '$absentCount', AppColors.sindoorRed, Icons.cancel_outlined)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _buildSummaryTile('Pending Checkout', '$pendingCheckout', AppColors.royalPurple, Icons.exit_to_app_rounded)),
+                        ],
+                      );
+                    },
                   );
                 },
               );
             },
           ),
 
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
           Text('Recent Live Attendance Stream', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
           const SizedBox(height: 12),
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppColors.cardDark,
               borderRadius: BorderRadius.circular(16),
@@ -230,7 +276,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildSummaryTile(String title, String value, Color color, IconData icon) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.cardDark,
         borderRadius: BorderRadius.circular(16),
@@ -239,10 +285,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 12),
-          Text(value, style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-          Text(title, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+          Icon(icon, color: color, size: 26),
+          const SizedBox(height: 10),
+          Text(value, style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          Text(title, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
         ],
       ),
     );
@@ -250,7 +296,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildStaffDirectoryTab() {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -267,11 +313,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.transparent,
                     shadowColor: Colors.transparent,
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  icon: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white),
-                  label: const Text('ADD NEW EMPLOYEE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  icon: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 18),
+                  label: const Text('ADD EMPLOYEE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
@@ -287,6 +333,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ],
           ),
           const SizedBox(height: 16),
+
           // Search Bar
           TextField(
             controller: _searchCtrl,
@@ -294,7 +341,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             style: const TextStyle(color: AppColors.textPrimary),
             decoration: InputDecoration(
               hintText: 'Search staff by name, code, or department...',
-              hintStyle: const TextStyle(color: AppColors.textMuted),
+              hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
               prefixIcon: const Icon(Icons.search_rounded, color: AppColors.haldiGold),
               filled: true,
               fillColor: AppColors.cardDark,
@@ -313,6 +360,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
           ),
           const SizedBox(height: 16),
+
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -337,7 +385,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 if (docs.isEmpty) {
                   return Center(
                     child: Text(
-                      _searchQuery.isNotEmpty ? 'No staff matching "$_searchQuery"' : 'No staff members added yet. Click "Add New Employee" to enroll staff.',
+                      _searchQuery.isNotEmpty ? 'No staff matching "$_searchQuery"' : 'No staff members added yet. Click "ADD EMPLOYEE" to enroll staff.',
                       style: GoogleFonts.inter(color: AppColors.textMuted),
                     ),
                   );
@@ -353,7 +401,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         borderRadius: BorderRadius.circular(12),
                         side: const BorderSide(color: AppColors.cardBorderDark),
                       ),
-                      margin: const EdgeInsets.only(bottom: 12),
+                      margin: const EdgeInsets.only(bottom: 10),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: emp.active ? AppColors.kesariSaffron : AppColors.textMuted,
@@ -371,12 +419,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               ),
                           ],
                         ),
-                        subtitle: Text('Code: ${emp.employeeCode} | Dept: ${emp.department} | Salary: ₹${emp.monthlySalary.toStringAsFixed(0)}/mo', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                        subtitle: Text('Code: ${emp.employeeCode} | Dept: ${emp.department} | ₹${emp.monthlySalary.toStringAsFixed(0)}/mo', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Chip(
-                              label: Text(emp.faceEnrollmentStatus ? 'Face Enrolled ✓' : 'Face Pending ⚠', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                              label: Text(emp.faceEnrollmentStatus ? 'Face ✓' : 'Pending ⚠', style: const TextStyle(color: Colors.white, fontSize: 10)),
                               backgroundColor: emp.faceEnrollmentStatus ? AppColors.pannaEmerald : AppColors.haldiGold,
                             ),
                             IconButton(
@@ -467,45 +515,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  Widget _buildShiftsTab() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Shift Engine Configuration', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-          const SizedBox(height: 16),
-          Card(
-            color: AppColors.cardDark,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: AppColors.cardBorderDark),
-            ),
-            child: const ListTile(
-              title: Text('Morning Shift (Default)', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-              subtitle: Text('Check-in: 10:00 AM - 10:30 AM | Checkout: 06:30 PM - 07:30 PM | Grace: 15 mins', style: TextStyle(color: AppColors.textMuted)),
-              trailing: Icon(Icons.edit, color: AppColors.haldiGold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPayrollUdhaarTab() {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Staff Advance (Udhaar) & Monthly Payslips', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              Text('Payroll & Monthly Payslips', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.pannaEmerald),
-                icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
-                label: const Text('GENERATE PAYSLIP PDF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white, size: 18),
+                label: const Text('PAYSLIP PDF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                 onPressed: () => _showPayslipModal(),
               ),
             ],
@@ -537,7 +560,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 return Column(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         color: AppColors.cardDark,
                         borderRadius: BorderRadius.circular(16),
@@ -549,12 +572,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Total Monthly Staff Payroll:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13)),
-                              Text('₹${totalGrossSalary.toStringAsFixed(0)}', style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontSize: 24, fontWeight: FontWeight.bold)),
+                              Text('Total Monthly Staff Payroll:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
+                              Text('₹${totalGrossSalary.toStringAsFixed(0)}', style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontSize: 22, fontWeight: FontWeight.bold)),
                             ],
                           ),
                           Chip(
-                            label: Text('${docs.length} Active Staff', style: const TextStyle(color: Colors.white)),
+                            label: Text('${docs.length} Active Staff', style: const TextStyle(color: Colors.white, fontSize: 11)),
                             backgroundColor: AppColors.kesariSaffron,
                           ),
                         ],
@@ -572,7 +595,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             child: ListTile(
                               leading: const CircleAvatar(backgroundColor: AppColors.haldiGold, child: Icon(Icons.payments_outlined, color: Colors.white)),
                               title: Text(emp.fullName, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-                              subtitle: Text('Base Salary: ₹${emp.monthlySalary.toStringAsFixed(0)}/month', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                              subtitle: Text('Base Salary: ₹${emp.monthlySalary.toStringAsFixed(0)}/month', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
                               trailing: Text('Net: ₹${emp.monthlySalary.toStringAsFixed(0)}', style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontWeight: FontWeight.bold, fontSize: 15)),
                             ),
                           );
@@ -610,7 +633,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           backgroundColor: AppColors.cardDark,
           title: Text('Monthly Staff Payslip Breakdown', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
           content: SizedBox(
-            width: 500,
+            width: 450,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -658,7 +681,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildKiosksTab() {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -718,7 +741,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildAnnouncementsTab() {
     final textCtrl = TextEditingController();
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -729,7 +752,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             style: const TextStyle(color: AppColors.textPrimary),
             decoration: InputDecoration(
               hintText: 'Enter message to broadcast on Entrance Kiosk device...',
-              hintStyle: const TextStyle(color: AppColors.textMuted),
+              hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
               filled: true,
               fillColor: AppColors.inputBgDark,
               border: OutlineInputBorder(
