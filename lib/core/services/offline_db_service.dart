@@ -68,6 +68,31 @@ class OfflineDbService {
     );
   }
 
+  // Check if employee has logged attendance recently (prevents double check-ins within windowMinutes)
+  Future<bool> hasRecentAttendance(String employeeId, String date, {int windowMinutes = 5}) async {
+    final db = await database;
+    final List<Map<String, dynamic>> records = await db.query(
+      'offline_attendance',
+      where: 'employeeId = ? AND date = ?',
+      whereArgs: [employeeId, date],
+      orderBy: 'checkInTime DESC',
+      limit: 1,
+    );
+
+    if (records.isEmpty) return false;
+
+    final lastCheckInStr = records.first['checkInTime'];
+    if (lastCheckInStr == null) return false;
+
+    try {
+      final lastTime = DateTime.parse(lastCheckInStr);
+      final difference = DateTime.now().difference(lastTime);
+      return difference.inMinutes < windowMinutes;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Get all pending unsynced attendance records
   Future<List<AttendanceModel>> getPendingAttendance() async {
     final db = await database;

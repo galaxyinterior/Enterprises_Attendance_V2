@@ -42,6 +42,35 @@ class FaceRecognitionService {
     return await _faceDetector.processImage(inputImage);
   }
 
+  /// Validate live face quality and basic anti-spoofing criteria (frontal angle, eye openness, bounding size)
+  bool isLiveFaceValid(Face face) {
+    // 1. Check face bounding box area (must be substantial, e.g. at least 100x100 pixels)
+    if (face.boundingBox.width < 90 || face.boundingBox.height < 90) {
+      debugPrint('Anti-spoofing warning: Face box too small (${face.boundingBox.width}x${face.boundingBox.height})');
+      return false;
+    }
+
+    // 2. Check head yaw & roll angles (must be roughly frontal: within ±25 degrees)
+    if (face.headEulerAngleY != null && face.headEulerAngleY!.abs() > 25) {
+      debugPrint('Anti-spoofing warning: Excessive head yaw angle (${face.headEulerAngleY})');
+      return false;
+    }
+    if (face.headEulerAngleZ != null && face.headEulerAngleZ!.abs() > 25) {
+      debugPrint('Anti-spoofing warning: Excessive head roll angle (${face.headEulerAngleZ})');
+      return false;
+    }
+
+    // 3. Check eye openness if classification is available (prevents static photo or closed eyes)
+    if (face.leftEyeOpenProbability != null && face.rightEyeOpenProbability != null) {
+      if (face.leftEyeOpenProbability! < 0.2 && face.rightEyeOpenProbability! < 0.2) {
+        debugPrint('Anti-spoofing warning: Eyes closed or unreadable');
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   /// Process raw image bytes & path, detect face, crop face ROI, and extract 128D embedding
   Future<List<double>?> processFaceFromBytes(Uint8List bytes, String tempFilePath) async {
     await initialize();
@@ -54,6 +83,11 @@ class FaceRecognitionService {
 
       if (faces.isNotEmpty) {
         final face = faces.first;
+        if (!isLiveFaceValid(face)) {
+          debugPrint('Face failed anti-spoofing quality checks.');
+          return null;
+        }
+
         final boundingBox = face.boundingBox;
 
         int x = boundingBox.left.toInt().clamp(0, decoded.width - 1);

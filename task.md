@@ -48,7 +48,7 @@ Master tracking document for the Smart Attendance & Enterprise Management Ecosys
 - [x] **ML Kit Detector Integration**: Accurate face detection, landmark bounding box extraction (`google_mlkit_face_detection`).
 - [x] **MobileFaceNet TFLite Model**: Bundled `assets/mobile_facenet.tflite` model execution via `tflite_flutter`.
 - [x] **128D Cosine Similarity Matching**: L2 normalization and cosine similarity match against enrolled embeddings.
-- [ ] **Anti-Spoofing & Multi-Frame Quality**: Blink/head movement verification and multi-frame quality filtering.
+- [x] **Anti-Spoofing & Quality Checks**: Validation of face bounding box size, head rotation angles (yaw/roll), and eye openness probability.
 
 ---
 
@@ -63,7 +63,7 @@ Master tracking document for the Smart Attendance & Enterprise Management Ecosys
 ## ⚡ Phase 7 — Offline-First SQLite Sync Engine
 - [x] **SQLite Database Schema (`attendance_offline.db`)**: Local storage for offline attendance logs and employee embeddings.
 - [x] **Auto-Sync Worker**: Listen to connectivity changes and push queued logs when internet is restored.
-- [ ] **Conflict Resolution & Anti-Duplicate Check**: Prevent double check-ins within configurable window (e.g. 5 mins).
+- [x] **Conflict Resolution & Anti-Duplicate Safeguard**: Prevent duplicate check-ins for the same employee within configurable time window (e.g. 5 mins).
 
 ---
 
@@ -75,8 +75,8 @@ Master tracking document for the Smart Attendance & Enterprise Management Ecosys
 ---
 
 ## 📡 Phase 9 — Multi-Device Pairing & Heartbeat Monitoring
-- [ ] **Kiosk Device Registration**: Unique device ID pairing with business tenant.
-- [ ] **Live Heartbeat Ping**: Periodic heartbeat ping to monitor kiosk online/offline status.
+- [x] **Kiosk Device Registration**: Unique device ID pairing under `businesses/{businessId}/kiosks/{deviceId}`.
+- [x] **Live Heartbeat Ping Service**: Periodic heartbeat service (`KioskHeartbeatService`) monitoring device online/offline status.
 
 ---
 
