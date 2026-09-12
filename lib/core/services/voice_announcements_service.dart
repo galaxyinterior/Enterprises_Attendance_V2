@@ -47,17 +47,19 @@ class VoiceAnnouncementsService {
     await _flutterTts.speak(message);
   }
 
-  // Speak Blink Eyes & Head Movement Liveness Prompt
+  // Speak Blink Eyes Liveness Prompt
   Future<void> speakBlinkPrompt() async {
     await initialize();
+    await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
-    await _flutterTts.speak("Please blink your eyes and turn your head slightly to verify attendance.");
+    await _flutterTts.speak("Please blink your eyes to verify attendance.");
   }
 
   Future<void> speakLivenessPrompt() async {
     await initialize();
+    await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
-    await _flutterTts.speak("Please blink your eyes and turn your head slightly to verify attendance.");
+    await _flutterTts.speak("Please blink your eyes to verify attendance.");
   }
 
   // Speak window closed or shift mismatch alert
