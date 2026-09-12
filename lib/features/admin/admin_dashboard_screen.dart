@@ -9,6 +9,8 @@ import '../../models/employee_model.dart';
 import '../auth/login_screen.dart';
 import 'add_employee_screen.dart';
 import 'edit_employee_screen.dart';
+import 'shift_management_screen.dart';
+import 'admin_calendar_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   final String shopId;
@@ -53,6 +55,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Shift Settings & Rules',
+            icon: const Icon(Icons.alarm_on_rounded, color: AppColors.kesariSaffron),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ShiftManagementScreen(
+                    businessId: widget.businessId,
+                    shopId: widget.shopId,
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
             tooltip: 'Logout',
             icon: const Icon(Icons.logout_rounded, color: AppColors.sindoorRed),
             onPressed: () async {
@@ -73,6 +89,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         children: [
           _buildOverviewTab(),
           _buildStaffDirectoryTab(),
+          AdminCalendarScreen(businessId: widget.businessId, shopId: widget.shopId),
           _buildPayrollUdhaarTab(),
           _buildKiosksTab(),
           _buildAnnouncementsTab(),
@@ -92,8 +109,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           type: BottomNavigationBarType.fixed,
           selectedItemColor: AppColors.kesariSaffron,
           unselectedItemColor: AppColors.textMuted,
-          selectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12),
-          unselectedLabelStyle: GoogleFonts.inter(fontSize: 11),
+          selectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 10),
+          unselectedLabelStyle: GoogleFonts.inter(fontSize: 9),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.dashboard_rounded),
@@ -104,6 +121,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               icon: Icon(Icons.people_alt_rounded),
               activeIcon: Icon(Icons.people_alt_rounded, color: AppColors.kesariSaffron),
               label: 'Staff',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_month_rounded),
+              activeIcon: Icon(Icons.calendar_month_rounded, color: AppColors.kesariSaffron),
+              label: 'Calendar',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.account_balance_wallet_rounded),

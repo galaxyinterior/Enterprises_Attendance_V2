@@ -442,30 +442,64 @@ class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
         children: [
           Text('Assigned Shift', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
           const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: AppColors.inputBgDark,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.cardBorderDark),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                dropdownColor: AppColors.cardDark,
-                isExpanded: true,
-                value: _selectedShift,
-                style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
-                items: const [
-                  DropdownMenuItem(value: 'Morning Shift (10:00 AM - 06:30 PM)', child: Text('Morning Shift (10 AM - 6:30 PM)')),
-                  DropdownMenuItem(value: 'Evening Shift (02:00 PM - 10:30 PM)', child: Text('Evening Shift (2 PM - 10:30 PM)')),
-                  DropdownMenuItem(value: 'Night Shift (09:00 PM - 06:00 AM)', child: Text('Night Shift (9 PM - 6 AM)')),
-                  DropdownMenuItem(value: 'General Shift (09:00 AM - 05:00 PM)', child: Text('General Shift (9 AM - 5 PM)')),
-                ],
-                onChanged: (val) {
-                  if (val != null) setState(() => _selectedShift = val);
-                },
-              ),
-            ),
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection(AppConstants.colBusinesses)
+                .doc(widget.businessId)
+                .collection('shifts')
+                .snapshots(),
+            builder: (context, snapshot) {
+              List<DropdownMenuItem<String>> items = [];
+
+              if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+                for (var doc in snapshot.data!.docs) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final name = data['shiftName'] ?? 'Shift';
+                  final start = data['startTime'] ?? '';
+                  final end = data['endTime'] ?? '';
+                  final label = '$name ($start - $end)';
+                  items.add(DropdownMenuItem(value: name, child: Text(label)));
+                }
+              }
+
+              // Fallback default options if no custom shifts configured
+              if (items.isEmpty) {
+                items = [
+                  DropdownMenuItem(value: _selectedShift, child: Text(_selectedShift)),
+                  const DropdownMenuItem(value: 'General Shift (09:00 AM - 06:00 PM)', child: Text('General Shift (9 AM - 6 PM)')),
+                  const DropdownMenuItem(value: 'Morning Shift (10:00 AM - 06:30 PM)', child: Text('Morning Shift (10 AM - 6:30 PM)')),
+                  const DropdownMenuItem(value: 'Evening Shift (02:00 PM - 10:30 PM)', child: Text('Evening Shift (2 PM - 10:30 PM)')),
+                  const DropdownMenuItem(value: 'Night Shift (09:00 PM - 06:00 AM)', child: Text('Night Shift (9 PM - 6 AM)')),
+                ];
+              }
+
+              // Ensure selected shift is valid
+              String value = _selectedShift;
+              if (!items.any((item) => item.value == value)) {
+                items.insert(0, DropdownMenuItem(value: value, child: Text(value)));
+              }
+
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.inputBgDark,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.cardBorderDark),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    dropdownColor: AppColors.cardDark,
+                    isExpanded: true,
+                    value: value,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                    items: items,
+                    onChanged: (val) {
+                      if (val != null) setState(() => _selectedShift = val);
+                    },
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),

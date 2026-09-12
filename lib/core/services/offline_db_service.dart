@@ -22,7 +22,7 @@ class OfflineDbService {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         // Attendance offline queue table
         await db.execute('''
@@ -36,6 +36,9 @@ class OfflineDbService {
             checkInTime TEXT,
             checkOutTime TEXT,
             status TEXT,
+            lateReason TEXT,
+            lateMinutes INTEGER,
+            approvalStatus TEXT,
             confidence REAL,
             syncStatus TEXT,
             createdAt TEXT,
@@ -58,6 +61,21 @@ class OfflineDbService {
           )
         ''');
 
+        // Cached local custom shifts table
+        await db.execute('''
+          CREATE TABLE local_shifts (
+            shiftId TEXT PRIMARY KEY,
+            businessId TEXT,
+            shopId TEXT,
+            shiftName TEXT,
+            startTime TEXT,
+            endTime TEXT,
+            maxCheckInTime TEXT,
+            gracePeriodMinutes INTEGER,
+            createdAt TEXT
+          )
+        ''');
+
         // Indexes for high performance
         await db.execute('CREATE INDEX IF NOT EXISTS idx_emp_business ON local_employees(businessId)');
         await db.execute('CREATE INDEX IF NOT EXISTS idx_att_sync ON offline_attendance(syncStatus)');
@@ -70,6 +88,26 @@ class OfflineDbService {
             await db.execute('ALTER TABLE local_employees ADD COLUMN phone TEXT');
             await db.execute('ALTER TABLE local_employees ADD COLUMN department TEXT');
             await db.execute('ALTER TABLE local_employees ADD COLUMN designation TEXT');
+          } catch (_) {}
+        }
+        if (oldVersion < 3) {
+          try {
+            await db.execute('ALTER TABLE offline_attendance ADD COLUMN lateReason TEXT');
+            await db.execute('ALTER TABLE offline_attendance ADD COLUMN lateMinutes INTEGER');
+            await db.execute('ALTER TABLE offline_attendance ADD COLUMN approvalStatus TEXT');
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS local_shifts (
+                shiftId TEXT PRIMARY KEY,
+                businessId TEXT,
+                shopId TEXT,
+                shiftName TEXT,
+                startTime TEXT,
+                endTime TEXT,
+                maxCheckInTime TEXT,
+                gracePeriodMinutes INTEGER,
+                createdAt TEXT
+              )
+            ''');
           } catch (_) {}
         }
       },
@@ -195,5 +233,58 @@ class OfflineDbService {
       }
     }
     return result;
+  }
+
+  // Save/Cache shifts locally in SQLite
+  Future<void> saveLocalShifts(List<Map<String, dynamic>> shiftMaps) async {
+    final db = await database;
+    final batch = db.batch();
+    for (var shift in shiftMaps) {
+      final String id = shift['shiftId'] ?? '';
+      if (id.isEmpty) continue;
+      batch.insert(
+        'local_shifts',
+        {
+          'shiftId': id,
+          'businessId': shift['businessId'] ?? '',
+          'shopId': shift['shopId'] ?? '',
+          'shiftName': shift['shiftName'] ?? '',
+          'startTime': shift['startTime'] ?? '09:00 AM',
+          'endTime': shift['endTime'] ?? '06:00 PM',
+          'maxCheckInTime': shift['maxCheckInTime'] ?? '09:15 AM',
+          'gracePeriodMinutes': shift['gracePeriodMinutes'] ?? 15,
+          'createdAt': shift['createdAt'] is DateTime
+              ? (shift['createdAt'] as DateTime).toIso8601String()
+              : (shift['createdAt']?.toString() ?? DateTime.now().toIso8601String()),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  // Get all cached local shifts for offline kiosk & admin validation
+  Future<List<Map<String, dynamic>>> getLocalShifts(String businessId) async {
+    final db = await database;
+    return await db.query(
+      'local_shifts',
+      where: 'businessId = ?',
+      whereArgs: [businessId],
+    );
+  }
+
+  // Update late attendance approval status locally
+  Future<void> updateAttendanceApproval(String attendanceId, String approvalStatus, String status) async {
+    final db = await database;
+    await db.update(
+      'offline_attendance',
+      {
+        'approvalStatus': approvalStatus,
+        'status': status,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
+      where: 'attendanceId = ?',
+      whereArgs: [attendanceId],
+    );
   }
 }

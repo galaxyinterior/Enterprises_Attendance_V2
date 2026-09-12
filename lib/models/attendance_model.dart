@@ -8,6 +8,9 @@ class AttendanceModel {
   final DateTime? checkInTime;
   final DateTime? checkOutTime;
   final String status; // PRESENT, LATE, ABSENT, HALF_DAY, EARLY_CHECKOUT
+  final String? lateReason; // Reason submitted by employee if late
+  final int? lateMinutes; // How many minutes late
+  final String? approvalStatus; // PENDING, APPROVED, REJECTED
   final double confidence;
   final String syncStatus; // PENDING, COMPLETED
   final DateTime createdAt;
@@ -23,6 +26,9 @@ class AttendanceModel {
     this.checkInTime,
     this.checkOutTime,
     required this.status,
+    this.lateReason,
+    this.lateMinutes,
+    this.approvalStatus,
     this.confidence = 1.0,
     this.syncStatus = 'PENDING',
     required this.createdAt,
@@ -40,6 +46,9 @@ class AttendanceModel {
       'checkInTime': checkInTime?.toIso8601String(),
       'checkOutTime': checkOutTime?.toIso8601String(),
       'status': status,
+      'lateReason': lateReason,
+      'lateMinutes': lateMinutes,
+      'approvalStatus': approvalStatus,
       'confidence': confidence,
       'syncStatus': syncStatus,
       'createdAt': createdAt.toIso8601String(),
@@ -58,6 +67,9 @@ class AttendanceModel {
       checkInTime: map['checkInTime'] != null ? DateTime.parse(map['checkInTime']) : null,
       checkOutTime: map['checkOutTime'] != null ? DateTime.parse(map['checkOutTime']) : null,
       status: map['status'] ?? 'PRESENT',
+      lateReason: map['lateReason'],
+      lateMinutes: map['lateMinutes'] != null ? (map['lateMinutes'] as num).toInt() : null,
+      approvalStatus: map['approvalStatus'],
       confidence: (map['confidence'] ?? 1.0).toDouble(),
       syncStatus: map['syncStatus'] ?? 'PENDING',
       createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime.now(),

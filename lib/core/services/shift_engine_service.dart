@@ -1,15 +1,20 @@
 import '../constants/app_constants.dart';
+import '../../models/shift_model.dart';
 
 class ShiftStatusResult {
-  final String status; // AppConstants.attendancePresent / attendanceLate / attendanceHalfDay
+  final String status; // AppConstants.attendancePresent / attendanceLate / AppConstants.attendanceAbsent
   final String statusLabel;
   final bool isLate;
+  final bool isPastDeadline;
+  final int lateMinutes;
   final String shiftName;
 
   ShiftStatusResult({
     required this.status,
     required this.statusLabel,
     required this.isLate,
+    required this.isPastDeadline,
+    required this.lateMinutes,
     required this.shiftName,
   });
 }
@@ -19,36 +24,76 @@ class ShiftEngineService {
   factory ShiftEngineService() => _instance;
   ShiftEngineService._internal();
 
-  /// Evaluate employee check-in timestamp against assigned shift
+  /// Parse time string like "09:00 AM", "09:15", "06:30 PM" into (hour, minute)
+  Map<String, int> _parseTimeString(String timeStr) {
+    if (timeStr.isEmpty) return {'hour': 9, 'minute': 0};
+    try {
+      final clean = timeStr.trim().toUpperCase();
+      bool isPm = clean.contains('PM');
+      bool isAm = clean.contains('AM');
+      String text = clean.replaceAll('AM', '').replaceAll('PM', '').trim();
+
+      final parts = text.split(':');
+      int hour = int.parse(parts[0]);
+      int minute = parts.length > 1 ? int.parse(parts[1]) : 0;
+
+      if (isPm && hour < 12) hour += 12;
+      if (isAm && hour == 12) hour = 0;
+
+      return {'hour': hour, 'minute': minute};
+    } catch (_) {
+      return {'hour': 9, 'minute': 0};
+    }
+  }
+
+  /// Evaluate employee check-in timestamp against shift model or shift string
   ShiftStatusResult evaluateCheckInStatus({
     required DateTime checkInTime,
     required String assignedShiftId,
+    ShiftModel? customShift,
   }) {
-    final shiftName = assignedShiftId.isNotEmpty
-        ? assignedShiftId
-        : 'Morning Shift (10:00 AM - 06:30 PM)';
+    String shiftName = customShift?.shiftName ?? (assignedShiftId.isNotEmpty ? assignedShiftId : 'General Shift (09:00 AM - 06:00 PM)');
 
-    int startHour = 10;
+    int startHour = 9;
     int startMinute = 0;
-    int graceMinutes = 15;
+    int deadlineHour = 9;
+    int deadlineMinute = 15;
 
-    final lowerShift = shiftName.toLowerCase();
+    if (customShift != null) {
+      final startParsed = _parseTimeString(customShift.startTime);
+      startHour = startParsed['hour']!;
+      startMinute = startParsed['minute']!;
 
-    if (lowerShift.contains('morning') || lowerShift.contains('10:00 am')) {
-      startHour = 10;
-      startMinute = 0;
-    } else if (lowerShift.contains('general') || lowerShift.contains('09:00 am')) {
-      startHour = 9;
-      startMinute = 0;
-    } else if (lowerShift.contains('evening') || lowerShift.contains('02:00 pm')) {
-      startHour = 14;
-      startMinute = 0;
-    } else if (lowerShift.contains('night') || lowerShift.contains('09:00 pm')) {
-      startHour = 21;
-      startMinute = 0;
+      final deadlineParsed = _parseTimeString(customShift.maxCheckInTime);
+      deadlineHour = deadlineParsed['hour']!;
+      deadlineMinute = deadlineParsed['minute']!;
+    } else {
+      final lower = shiftName.toLowerCase();
+      if (lower.contains('morning') || lower.contains('10:00 am')) {
+        startHour = 10;
+        startMinute = 0;
+        deadlineHour = 10;
+        deadlineMinute = 15;
+      } else if (lower.contains('evening') || lower.contains('02:00 pm')) {
+        startHour = 14;
+        startMinute = 0;
+        deadlineHour = 14;
+        deadlineMinute = 15;
+      } else if (lower.contains('night') || lower.contains('09:00 pm')) {
+        startHour = 21;
+        startMinute = 0;
+        deadlineHour = 21;
+        deadlineMinute = 15;
+      } else {
+        // Default General Shift: 9 AM, 9:15 AM cutoff
+        startHour = 9;
+        startMinute = 0;
+        deadlineHour = 9;
+        deadlineMinute = 15;
+      }
     }
 
-    final scheduledStartTime = DateTime(
+    final scheduledStart = DateTime(
       checkInTime.year,
       checkInTime.month,
       checkInTime.day,
@@ -56,29 +101,33 @@ class ShiftEngineService {
       startMinute,
     );
 
-    final graceEndTime = scheduledStartTime.add(Duration(minutes: graceMinutes));
-    final halfDayCutoff = scheduledStartTime.add(const Duration(hours: 4));
+    final deadlineTime = DateTime(
+      checkInTime.year,
+      checkInTime.month,
+      checkInTime.day,
+      deadlineHour,
+      deadlineMinute,
+    );
 
-    if (checkInTime.isBefore(graceEndTime) || checkInTime.isAtSameMomentAs(graceEndTime)) {
+    final bool isPastDeadline = checkInTime.isAfter(deadlineTime);
+    final int lateMinutes = isPastDeadline ? checkInTime.difference(scheduledStart).inMinutes : 0;
+
+    if (!isPastDeadline) {
       return ShiftStatusResult(
         status: AppConstants.attendancePresent,
         statusLabel: 'On Time (Present)',
         isLate: false,
-        shiftName: shiftName,
-      );
-    } else if (checkInTime.isBefore(halfDayCutoff)) {
-      final lateMinutes = checkInTime.difference(scheduledStartTime).inMinutes;
-      return ShiftStatusResult(
-        status: AppConstants.attendanceLate,
-        statusLabel: 'Late Arrival ($lateMinutes mins late)',
-        isLate: true,
+        isPastDeadline: false,
+        lateMinutes: 0,
         shiftName: shiftName,
       );
     } else {
       return ShiftStatusResult(
-        status: AppConstants.attendanceHalfDay,
-        statusLabel: 'Half Day Arrival',
+        status: AppConstants.attendanceAbsent,
+        statusLabel: 'Late Arrival ($lateMinutes mins late) - Pending Reason Approval',
         isLate: true,
+        isPastDeadline: true,
+        lateMinutes: lateMinutes,
         shiftName: shiftName,
       );
     }

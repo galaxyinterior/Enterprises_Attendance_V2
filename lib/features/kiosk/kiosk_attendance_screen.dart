@@ -15,6 +15,7 @@ import '../../core/services/auth_routing_service.dart';
 import '../../core/services/shift_engine_service.dart';
 import '../../core/services/sync_engine.dart';
 import '../../models/attendance_model.dart';
+import '../../models/shift_model.dart';
 import '../auth/login_screen.dart';
 
 class KioskAttendanceScreen extends StatefulWidget {
@@ -338,53 +339,75 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           });
         } else {
           // Phase 4: Evaluate assigned shift schedule & attendance status
-          final shiftResult = ShiftEngineService().evaluateCheckInStatus(
-            checkInTime: now,
-            assignedShiftId: empData['assignedShiftId'] ?? empData['assignedShift'] ?? '',
-          );
-
-          final attendance = AttendanceModel(
-            attendanceId: const Uuid().v4(),
-            businessId: widget.businessId,
-            employeeId: empId,
-            employeeName: name,
-            date: dateStr,
-            shiftId: shiftResult.shiftName,
-            checkInTime: now,
-            status: shiftResult.status,
-            confidence: confidence,
-            syncStatus: AppConstants.syncPending,
-            createdAt: now,
-            updatedAt: now,
-          );
-
-          // 1. Save to offline SQLite database immediately (100% Offline-First)
-          await _offlineDb.insertAttendance(attendance);
-
-          // 2. Queue Cloud Firestore sync asynchronously in background (Phase 5)
-          FirebaseFirestore.instance
-              .collection(AppConstants.colBusinesses)
-              .doc(widget.businessId)
-              .collection(AppConstants.colAttendance)
-              .doc(attendance.attendanceId)
-              .set(attendance.toMap())
-              .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
-              .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
-
-          // Speak personalized voice greeting
-          if (shiftResult.isLate) {
-            await _voiceService.speakAlert('$name, you are late for ${shiftResult.shiftName}. Attendance marked as LATE.');
-          } else {
-            await _voiceService.speakCheckInGreeting(name);
+          // Fetch local cached custom shifts if available
+          final localShifts = await _offlineDb.getLocalShifts(widget.businessId);
+          ShiftModel? matchedShift;
+          final String empShiftName = empData['assignedShiftId'] ?? empData['assignedShift'] ?? '';
+          if (localShifts.isNotEmpty) {
+            final found = localShifts.firstWhere(
+              (s) => s['shiftName'] == empShiftName || s['shiftId'] == empShiftName,
+              orElse: () => localShifts.first,
+            );
+            matchedShift = ShiftModel.fromMap(found);
           }
 
-          setState(() {
-            _lastRecognizedEmployee = empData;
-            _lastRecognizedName = name;
-            _noMatchFound = false;
-            _scanFailureReason = null;
-            _statusMessage = '✓ Welcome $name! ${shiftResult.statusLabel}.';
-          });
+          final shiftResult = ShiftEngineService().evaluateCheckInStatus(
+            checkInTime: now,
+            assignedShiftId: empShiftName,
+            customShift: matchedShift,
+          );
+
+          if (shiftResult.isPastDeadline) {
+            await _handleLateAttendanceWithReason(
+              empId: empId,
+              name: name,
+              confidence: confidence,
+              empData: empData,
+              shiftResult: shiftResult,
+              now: now,
+              dateStr: dateStr,
+            );
+          } else {
+            final attendance = AttendanceModel(
+              attendanceId: const Uuid().v4(),
+              businessId: widget.businessId,
+              employeeId: empId,
+              employeeName: name,
+              date: dateStr,
+              shiftId: shiftResult.shiftName,
+              checkInTime: now,
+              status: shiftResult.status,
+              approvalStatus: 'APPROVED',
+              confidence: confidence,
+              syncStatus: AppConstants.syncPending,
+              createdAt: now,
+              updatedAt: now,
+            );
+
+            // 1. Save to offline SQLite database immediately (100% Offline-First)
+            await _offlineDb.insertAttendance(attendance);
+
+            // 2. Queue Cloud Firestore sync asynchronously in background
+            FirebaseFirestore.instance
+                .collection(AppConstants.colBusinesses)
+                .doc(widget.businessId)
+                .collection(AppConstants.colAttendance)
+                .doc(attendance.attendanceId)
+                .set(attendance.toMap())
+                .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
+                .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
+
+            // Speak personalized voice greeting
+            await _voiceService.speakCheckInGreeting(name);
+
+            setState(() {
+              _lastRecognizedEmployee = empData;
+              _lastRecognizedName = name;
+              _noMatchFound = false;
+              _scanFailureReason = null;
+              _statusMessage = '✓ Welcome $name! ${shiftResult.statusLabel}.';
+            });
+          }
         }
       } else {
         await _voiceService.speakAlert('Face not recognized. Please try again.');
@@ -418,6 +441,173 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         });
       }
     }
+  }
+
+  Future<void> _handleLateAttendanceWithReason({
+    required String empId,
+    required String name,
+    required double confidence,
+    required Map<String, dynamic> empData,
+    required ShiftStatusResult shiftResult,
+    required DateTime now,
+    required String dateStr,
+  }) async {
+    await _voiceService.speakAlert('$name, you are late for attendance. Please mark with reason.');
+
+    String selectedReason = 'Traffic Jam';
+    final customReasonCtrl = TextEditingController();
+    bool isSubmitting = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: AppColors.cardDark,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: AppColors.sindoorRed, size: 28),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'You Are Late For Attendance!',
+                      style: GoogleFonts.outfit(color: AppColors.sindoorRed, fontWeight: FontWeight.bold, fontSize: 17),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Check-in deadline for ${shiftResult.shiftName} has passed (${shiftResult.lateMinutes} mins late).',
+                      style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 13),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.haldiGold.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.haldiGold.withValues(alpha: 0.4)),
+                      ),
+                      child: Text(
+                        'Your attendance status remains ABSENT until Shop Admin approves your late reason.',
+                        style: GoogleFonts.inter(color: AppColors.haldiGold, fontWeight: FontWeight.w600, fontSize: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text('Select Reason for Late Check-In:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        'Traffic Jam',
+                        'Vehicle Breakdown',
+                        'Health Issue',
+                        'Weather / Rain',
+                        'Personal Emergency',
+                        'Other',
+                      ].map((r) {
+                        final isSelected = selectedReason == r;
+                        return ChoiceChip(
+                          label: Text(r, style: TextStyle(color: isSelected ? Colors.white : AppColors.textPrimary, fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                          selected: isSelected,
+                          selectedColor: AppColors.kesariSaffron,
+                          backgroundColor: AppColors.inputBgDark,
+                          onSelected: (val) {
+                            if (val) setDialogState(() => selectedReason = r);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: customReasonCtrl,
+                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText: 'Add specific details (optional)',
+                        hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                        filled: true,
+                        fillColor: AppColors.inputBgDark,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.kesariSaffron,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                  label: const Text('MARK WITH REASON', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  onPressed: isSubmitting
+                      ? null
+                      : () async {
+                          setDialogState(() => isSubmitting = true);
+                          final fullReason = customReasonCtrl.text.trim().isNotEmpty
+                              ? '$selectedReason — ${customReasonCtrl.text.trim()}'
+                              : selectedReason;
+
+                          final attendance = AttendanceModel(
+                            attendanceId: const Uuid().v4(),
+                            businessId: widget.businessId,
+                            employeeId: empId,
+                            employeeName: name,
+                            date: dateStr,
+                            shiftId: shiftResult.shiftName,
+                            checkInTime: now,
+                            status: AppConstants.attendanceAbsent, // ABSENT until Admin Approval!
+                            lateReason: fullReason,
+                            lateMinutes: shiftResult.lateMinutes,
+                            approvalStatus: 'PENDING',
+                            confidence: confidence,
+                            syncStatus: AppConstants.syncPending,
+                            createdAt: now,
+                            updatedAt: now,
+                          );
+
+                          // 1. Save to SQLite offline DB
+                          await _offlineDb.insertAttendance(attendance);
+
+                          // 2. Sync to Cloud Firestore
+                          FirebaseFirestore.instance
+                              .collection(AppConstants.colBusinesses)
+                              .doc(widget.businessId)
+                              .collection(AppConstants.colAttendance)
+                              .doc(attendance.attendanceId)
+                              .set(attendance.toMap())
+                              .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
+                              .catchError((err) => debugPrint('Cloud sync error: $err'));
+
+                          if (mounted) Navigator.pop(ctx);
+                        },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    setState(() {
+      _lastRecognizedEmployee = empData;
+      _lastRecognizedName = name;
+      _noMatchFound = false;
+      _scanFailureReason = null;
+      _statusMessage = '⚠️ Late Check-In Submitted for Admin Approval (Late: ${shiftResult.lateMinutes}m)';
+    });
   }
 
   void _showExitDialog() {
