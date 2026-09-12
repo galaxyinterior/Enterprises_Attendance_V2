@@ -626,6 +626,15 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                 .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
                 .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
 
+            // 3. Send Automatic Email Alert via Gmail SMTP
+            EmailNotificationService().sendPresentAttendanceEmail(
+              employeeName: name,
+              employeeId: empId,
+              shiftName: shiftResult.shiftName,
+              shopId: widget.shopId,
+              checkInTime: now,
+            );
+
             // Speak personalized voice greeting
             await _voiceService.speakCheckInGreeting(name);
 

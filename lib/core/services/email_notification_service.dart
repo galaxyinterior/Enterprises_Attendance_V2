@@ -193,5 +193,54 @@ class EmailNotificationService {
       return false;
     }
   }
+
+  Future<bool> sendPresentAttendanceEmail({
+    required String employeeName,
+    required String employeeId,
+    required String shiftName,
+    required String shopId,
+    required DateTime checkInTime,
+    String? adminEmail,
+  }) async {
+    final smtpServer = gmail(_smtpUser, _smtpPassword);
+    final recipient = (adminEmail != null && adminEmail.isNotEmpty && adminEmail.contains('@'))
+        ? adminEmail
+        : _masterEmail;
+
+    final String formattedTime = '${checkInTime.hour.toString().padLeft(2, '0')}:${checkInTime.minute.toString().padLeft(2, '0')}';
+
+    final message = Message()
+      ..from = Address(_smtpUser, 'Smart Attendance Ecosystem')
+      ..recipients.add(recipient)
+      ..subject = '✅ ATTENDANCE PRESENT ALERT: $employeeName (Check-In: $formattedTime)'
+      ..html = '''
+        <div style="font-family: Arial, sans-serif; padding: 24px; background-color: #0f172a; color: #ffffff; border-radius: 12px; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #10b981; margin-top: 0;">✅ Successful Check-In Alert</h2>
+          <p style="color: #cbd5e1; font-size: 15px;">An employee has successfully checked in on time via Kiosk Biometric Face Scanner.</p>
+          
+          <div style="background-color: #1e293b; padding: 16px; border-radius: 10px; border-left: 4px solid #10b981; margin: 20px 0;">
+            <table style="width: 100%; color: #ffffff; border-spacing: 0 6px;">
+              <tr><td style="color: #94a3b8; width: 140px;">Employee Name:</td><td><strong style="color: #ffffff; font-size: 16px;">$employeeName</strong></td></tr>
+              <tr><td style="color: #94a3b8;">Employee Code:</td><td><strong style="color: #f59e0b;">$employeeId</strong></td></tr>
+              <tr><td style="color: #94a3b8;">Shop ID:</td><td>$shopId</td></tr>
+              <tr><td style="color: #94a3b8;">Shift Name:</td><td>$shiftName</td></tr>
+              <tr><td style="color: #94a3b8;">Check-In Time:</td><td><strong style="color: #10b981; font-size: 16px;">$formattedTime</strong></td></tr>
+              <tr><td style="color: #94a3b8;">Status:</td><td><strong style="color: #10b981;">PRESENT (Approved)</strong></td></tr>
+            </table>
+          </div>
+
+          <p style="color: #64748b; font-size: 12px; margin-top: 24px; text-align: center;">Smart Attendance Ecosystem — Automatic Security Alert</p>
+        </div>
+      ''';
+
+    try {
+      final sendReport = await send(message, smtpServer);
+      debugPrint('Present attendance email sent successfully to $recipient: $sendReport');
+      return true;
+    } catch (e) {
+      debugPrint('Error sending present attendance email: $e');
+      return false;
+    }
+  }
 }
 
