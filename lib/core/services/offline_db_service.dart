@@ -22,7 +22,7 @@ class OfflineDbService {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         // Attendance offline queue table
         await db.execute('''
@@ -41,6 +41,9 @@ class OfflineDbService {
             approvalStatus TEXT,
             confidence REAL,
             syncStatus TEXT,
+            isHolidayWork INTEGER DEFAULT 0,
+            holidayBonusAmount REAL DEFAULT 0.0,
+            holidayBonusStatus TEXT,
             createdAt TEXT,
             updatedAt TEXT
           )
@@ -110,6 +113,13 @@ class OfflineDbService {
             ''');
           } catch (_) {}
         }
+        if (oldVersion < 4) {
+          try {
+            await db.execute('ALTER TABLE offline_attendance ADD COLUMN isHolidayWork INTEGER DEFAULT 0');
+            await db.execute('ALTER TABLE offline_attendance ADD COLUMN holidayBonusAmount REAL DEFAULT 0.0');
+            await db.execute('ALTER TABLE offline_attendance ADD COLUMN holidayBonusStatus TEXT');
+          } catch (_) {}
+        }
       },
     );
   }
@@ -119,7 +129,7 @@ class OfflineDbService {
     final db = await database;
     await db.insert(
       'offline_attendance',
-      attendance.toMap(),
+      attendance.toSqliteMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }

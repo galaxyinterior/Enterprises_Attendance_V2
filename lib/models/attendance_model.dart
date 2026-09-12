@@ -65,6 +65,11 @@ class AttendanceModel {
       'updatedAt': updatedAt.toIso8601String(),
     };
   }
+  Map<String, dynamic> toSqliteMap() {
+    final map = toMap();
+    map['isHolidayWork'] = isHolidayWork ? 1 : 0;
+    return map;
+  }
 
   factory AttendanceModel.fromMap(Map<String, dynamic> map) {
     return AttendanceModel(
@@ -82,7 +87,7 @@ class AttendanceModel {
       approvalStatus: map['approvalStatus'],
       confidence: (map['confidence'] ?? 1.0).toDouble(),
       syncStatus: map['syncStatus'] ?? 'PENDING',
-      isHolidayWork: map['isHolidayWork'] ?? false,
+      isHolidayWork: map['isHolidayWork'] == true || map['isHolidayWork'] == 1,
       holidayBonusAmount: (map['holidayBonusAmount'] ?? 0.0).toDouble(),
       holidayBonusStatus: map['holidayBonusStatus'],
       createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime.now(),

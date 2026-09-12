@@ -534,31 +534,27 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           debugPrint('attendanceId=${attendance.attendanceId}');
           debugPrint('status=${attendance.status}');
 
-          // 1. Save SQLite
-          await _offlineDb.insertAttendance(attendance);
-
-          debugPrint('SQLITE_ATTENDANCE_INSERT_SUCCESS');
-          debugPrint('attendanceId=${attendance.attendanceId}');
-
-          debugPrint('FIRESTORE_ATTENDANCE_WRITE_START');
-          // 2. Sync Firestore
+          // 1. Save SQLite (safely wrapped)
           try {
-            FirebaseFirestore.instance
+            await _offlineDb.insertAttendance(attendance);
+            debugPrint('SQLITE_ATTENDANCE_INSERT_SUCCESS');
+          } catch (sqliteErr) {
+            debugPrint('SQLite insert notice: $sqliteErr');
+          }
+
+          // 2. Direct Firestore Cloud Write
+          debugPrint('FIRESTORE_ATTENDANCE_WRITE_START');
+          try {
+            await FirebaseFirestore.instance
                 .collection(AppConstants.colBusinesses)
                 .doc(widget.businessId)
                 .collection(AppConstants.colAttendance)
                 .doc(attendance.attendanceId)
-                .set(attendance.toMap())
-                .then((_) {
-                  debugPrint('FIRESTORE_ATTENDANCE_WRITE_SUCCESS');
-                  _offlineDb.markAttendanceSynced(attendance.attendanceId);
-                })
-                .catchError((err) {
-                  debugPrint('Background cloud sync queued: $err');
-                  return null;
-                });
+                .set(attendance.toMap());
+            debugPrint('FIRESTORE_ATTENDANCE_WRITE_SUCCESS');
+            _offlineDb.markAttendanceSynced(attendance.attendanceId);
           } catch (err) {
-            debugPrint('Background cloud sync notice: $err');
+            debugPrint('Direct Firestore write notice: $err');
           }
 
           // 3. Email Alert
@@ -952,8 +948,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                             updatedAt: now,
                           );
 
-                          // 1. Save to SQLite offline DB
-                          await _offlineDb.insertAttendance(attendance);
+                          // 1. Save to SQLite offline DB (safely wrapped)
+                          try {
+                            await _offlineDb.insertAttendance(attendance);
+                          } catch (sqliteErr) {
+                            debugPrint('SQLite late attendance insert notice: $sqliteErr');
+                          }
 
                           // 2. Sync to Cloud Firestore
                           try {
