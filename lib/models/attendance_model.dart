@@ -16,6 +16,10 @@ class AttendanceModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  final bool isHolidayWork;
+  final double holidayBonusAmount;
+  final String? holidayBonusStatus; // PENDING, APPROVED, REJECTED
+
   AttendanceModel({
     required this.attendanceId,
     required this.businessId,
@@ -31,6 +35,9 @@ class AttendanceModel {
     this.approvalStatus,
     this.confidence = 1.0,
     this.syncStatus = 'PENDING',
+    this.isHolidayWork = false,
+    this.holidayBonusAmount = 0.0,
+    this.holidayBonusStatus,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -51,6 +58,9 @@ class AttendanceModel {
       'approvalStatus': approvalStatus,
       'confidence': confidence,
       'syncStatus': syncStatus,
+      'isHolidayWork': isHolidayWork,
+      'holidayBonusAmount': holidayBonusAmount,
+      'holidayBonusStatus': holidayBonusStatus,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };
@@ -72,6 +82,9 @@ class AttendanceModel {
       approvalStatus: map['approvalStatus'],
       confidence: (map['confidence'] ?? 1.0).toDouble(),
       syncStatus: map['syncStatus'] ?? 'PENDING',
+      isHolidayWork: map['isHolidayWork'] ?? false,
+      holidayBonusAmount: (map['holidayBonusAmount'] ?? 0.0).toDouble(),
+      holidayBonusStatus: map['holidayBonusStatus'],
       createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : DateTime.now(),
       updatedAt: map['updatedAt'] != null ? DateTime.parse(map['updatedAt']) : DateTime.now(),
     );

@@ -586,6 +586,20 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
             customShift: matchedShift,
           );
 
+          // Check if today is a shop holiday
+          bool isHolidayWork = false;
+          try {
+            final holSnap = await FirebaseFirestore.instance
+                .collection(AppConstants.colBusinesses)
+                .doc(widget.businessId)
+                .collection('holidays')
+                .where('date', isEqualTo: dateStr)
+                .get();
+            if (holSnap.docs.isNotEmpty) {
+              isHolidayWork = true;
+            }
+          } catch (_) {}
+
           if (shiftResult.isPastDeadline) {
             await _handleLateAttendanceWithReason(
               empId: empId,
@@ -595,6 +609,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               shiftResult: shiftResult,
               now: now,
               dateStr: dateStr,
+              isHolidayWork: isHolidayWork,
             );
           } else {
             final attendance = AttendanceModel(
@@ -609,6 +624,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               approvalStatus: 'APPROVED',
               confidence: confidence,
               syncStatus: AppConstants.syncPending,
+              isHolidayWork: isHolidayWork,
+              holidayBonusStatus: isHolidayWork ? 'PENDING' : null,
               createdAt: now,
               updatedAt: now,
             );
@@ -689,6 +706,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     required ShiftStatusResult shiftResult,
     required DateTime now,
     required String dateStr,
+    bool isHolidayWork = false,
   }) async {
     await _voiceService.speakAlert('$name, you are late for attendance. Please mark with reason.');
 
@@ -812,6 +830,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                             approvalStatus: 'PENDING',
                             confidence: confidence,
                             syncStatus: AppConstants.syncPending,
+                            isHolidayWork: isHolidayWork,
+                            holidayBonusStatus: isHolidayWork ? 'PENDING' : null,
                             createdAt: now,
                             updatedAt: now,
                           );

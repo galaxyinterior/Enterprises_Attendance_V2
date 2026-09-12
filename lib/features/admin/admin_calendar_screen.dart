@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../models/attendance_model.dart';
+import '../../models/holiday_model.dart';
 
 class AdminCalendarScreen extends StatefulWidget {
   final String businessId;
@@ -66,6 +68,127 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
     }
   }
 
+  Future<void> _updateHolidayBonus(AttendanceModel att, bool approve, double bonusAmount) async {
+    final String newBonusStatus = approve ? 'APPROVED' : 'REJECTED';
+
+    try {
+      await FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .collection(AppConstants.colAttendance)
+          .doc(att.attendanceId)
+          .update({
+        'holidayBonusStatus': newBonusStatus,
+        'holidayBonusAmount': approve ? bonusAmount : 0.0,
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(approve
+                ? '🎉 Holiday Extra Bonus ₹${bonusAmount.toStringAsFixed(0)} APPROVED for ${att.employeeName}!'
+                : '❌ Holiday Bonus REJECTED for ${att.employeeName}.'),
+            backgroundColor: approve ? AppColors.pannaEmerald : AppColors.sindoorRed,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error updating holiday bonus: $e');
+    }
+  }
+
+  void _showAddHolidayDialog() {
+    final titleCtrl = TextEditingController();
+    DateTime pickedDate = DateTime.now();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          backgroundColor: AppColors.cardDark,
+          title: Text('🎉 Add Shop Holiday', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleCtrl,
+                style: const TextStyle(color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'Holiday Title (e.g. Diwali, Holi, Sunday Off)',
+                  labelStyle: const TextStyle(color: AppColors.textMuted),
+                  filled: true,
+                  fillColor: AppColors.inputBgDark,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              InkWell(
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: pickedDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2035),
+                  );
+                  if (d != null) {
+                    setDlgState(() => pickedDate = d);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.inputBgDark,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.cardBorderDark),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_month_rounded, color: AppColors.kesariSaffron, size: 18),
+                      const SizedBox(width: 8),
+                      Text(DateFormat('dd MMMM yyyy (EEEE)').format(pickedDate), style: const TextStyle(color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.kesariSaffron),
+              child: const Text('ADD HOLIDAY', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              onPressed: () async {
+                final title = titleCtrl.text.trim();
+                if (title.isEmpty) return;
+
+                final dateStr = DateFormat('yyyy-MM-dd').format(pickedDate);
+                final id = const Uuid().v4();
+
+                final holiday = HolidayModel(
+                  id: id,
+                  businessId: widget.businessId,
+                  date: dateStr,
+                  title: title,
+                  createdAt: DateTime.now(),
+                );
+
+                await FirebaseFirestore.instance
+                    .collection(AppConstants.colBusinesses)
+                    .doc(widget.businessId)
+                    .collection('holidays')
+                    .doc(id)
+                    .set(holiday.toMap());
+
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final String monthYearStr = DateFormat('MMMM yyyy').format(_selectedMonth);
@@ -81,74 +204,108 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
             _buildHeaderFilterCard(monthYearStr),
             const SizedBox(height: 16),
 
-            // Realtime Stream of Attendance for Selected Month
+            // Realtime Stream of Holidays & Attendance
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection(AppConstants.colBusinesses)
                   .doc(widget.businessId)
-                  .collection(AppConstants.colAttendance)
+                  .collection('holidays')
                   .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: Padding(padding: EdgeInsets.all(30), child: CircularProgressIndicator(color: AppColors.kesariSaffron)));
-                }
+              builder: (context, holidaySnapshot) {
+                final holidayDocs = holidaySnapshot.data?.docs ?? [];
+                final List<HolidayModel> holidays = holidayDocs
+                    .map((d) => HolidayModel.fromMap(d.data() as Map<String, dynamic>))
+                    .toList();
 
-                final docs = snapshot.data?.docs ?? [];
-                List<AttendanceModel> allRecords = docs.map((d) => AttendanceModel.fromMap(d.data() as Map<String, dynamic>)).toList();
+                return StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection(AppConstants.colBusinesses)
+                      .doc(widget.businessId)
+                      .collection(AppConstants.colAttendance)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: Padding(padding: EdgeInsets.all(30), child: CircularProgressIndicator(color: AppColors.kesariSaffron)));
+                    }
 
-                // Filter by month (YYYY-MM)
-                final monthPrefix = '${_selectedMonth.year}-${_selectedMonth.month.toString().padLeft(2, '0')}';
-                List<AttendanceModel> monthRecords = allRecords.where((r) => r.date.startsWith(monthPrefix)).toList();
+                    final docs = snapshot.data?.docs ?? [];
+                    List<AttendanceModel> allRecords = docs.map((d) => AttendanceModel.fromMap(d.data() as Map<String, dynamic>)).toList();
 
-                // Filter by selected employee if specified
-                if (_selectedEmployeeId != null && _selectedEmployeeId!.isNotEmpty) {
-                  monthRecords = monthRecords.where((r) => r.employeeId == _selectedEmployeeId).toList();
-                }
+                    // Filter by month (YYYY-MM)
+                    final monthPrefix = '${_selectedMonth.year}-${_selectedMonth.month.toString().padLeft(2, '0')}';
+                    List<AttendanceModel> monthRecords = allRecords.where((r) => r.date.startsWith(monthPrefix)).toList();
 
-                // Calculate summary counters
-                int presentCount = 0;
-                int absentCount = 0;
-                int lateCount = 0;
-                int pendingCount = 0;
+                    // Filter by selected employee if specified
+                    if (_selectedEmployeeId != null && _selectedEmployeeId!.isNotEmpty) {
+                      monthRecords = monthRecords.where((r) => r.employeeId == _selectedEmployeeId).toList();
+                    }
 
-                for (var r in monthRecords) {
-                  if (r.approvalStatus == 'PENDING') {
-                    pendingCount++;
-                    absentCount++; // Pending is counted as Absent until approved!
-                    lateCount++;
-                  } else if (r.status == AppConstants.attendancePresent || r.approvalStatus == 'APPROVED') {
-                    presentCount++;
-                    if (r.lateMinutes != null && r.lateMinutes! > 0) lateCount++;
-                  } else {
-                    absentCount++;
-                  }
-                }
+                    // Calculate summary counters
+                    int presentCount = 0;
+                    int absentCount = 0;
+                    int lateCount = 0;
+                    int pendingCount = 0;
 
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Summary Cards Row
-                    _buildSummaryCardsRow(
-                      present: presentCount,
-                      absent: absentCount,
-                      late: lateCount,
-                      pending: pendingCount,
-                    ),
-                    const SizedBox(height: 16),
+                    for (var r in monthRecords) {
+                      if (r.approvalStatus == 'PENDING') {
+                        pendingCount++;
+                        absentCount++; // Pending is counted as Absent until approved!
+                        lateCount++;
+                      } else if (r.status == AppConstants.attendancePresent || r.approvalStatus == 'APPROVED') {
+                        presentCount++;
+                        if (r.lateMinutes != null && r.lateMinutes! > 0) lateCount++;
+                      } else {
+                        absentCount++;
+                      }
+                    }
 
-                    // Calendar Sheet Grid
-                    _buildCalendarGrid(monthRecords),
-                    const SizedBox(height: 24),
+                    final pendingLate = monthRecords.where((r) => r.approvalStatus == 'PENDING').toList();
+                    final pendingHolidayBonus = monthRecords.where((r) => r.isHolidayWork && r.holidayBonusStatus == 'PENDING').toList();
 
-                    // Pending Approvals Section Header
-                    Text(
-                      'Pending Late Attendance Approvals ($pendingCount)',
-                      style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Summary Cards Row
+                        _buildSummaryCardsRow(
+                          present: presentCount,
+                          absent: absentCount,
+                          late: lateCount,
+                          pending: pendingCount,
+                        ),
+                        const SizedBox(height: 16),
 
-                    _buildPendingApprovalsList(monthRecords.where((r) => r.approvalStatus == 'PENDING').toList()),
-                  ],
+                        // Calendar Sheet Grid
+                        _buildCalendarGrid(monthRecords, holidays),
+                        const SizedBox(height: 24),
+
+                        // Holiday Work Bonus Approvals Section
+                        if (pendingHolidayBonus.isNotEmpty) ...[
+                          Row(
+                            children: [
+                              const Icon(Icons.stars_rounded, color: AppColors.haldiGold, size: 22),
+                              const SizedBox(width: 8),
+                              Text(
+                                '🎉 Holiday Work Bonus Approvals (${pendingHolidayBonus.length})',
+                                style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          _buildPendingHolidayBonusList(pendingHolidayBonus),
+                          const SizedBox(height: 24),
+                        ],
+
+                        // Pending Approvals Section Header
+                        Text(
+                          'Pending Late Attendance Approvals (${pendingLate.length})',
+                          style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 10),
+
+                        _buildPendingApprovalsList(pendingLate),
+                      ],
+                    );
+                  },
                 );
               },
             ),
@@ -193,51 +350,68 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
           ),
           const SizedBox(height: 12),
 
-          // Employee Dropdown Stream
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection(AppConstants.colBusinesses)
-                .doc(widget.businessId)
-                .collection(AppConstants.colEmployees)
-                .snapshots(),
-            builder: (context, snapshot) {
-              List<DropdownMenuItem<String>> items = [
-                const DropdownMenuItem(value: '', child: Text('All Employees Report')),
-              ];
+          Row(
+            children: [
+              // Employee Dropdown Stream
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection(AppConstants.colBusinesses)
+                      .doc(widget.businessId)
+                      .collection(AppConstants.colEmployees)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    List<DropdownMenuItem<String>> items = [
+                      const DropdownMenuItem(value: '', child: Text('All Employees Report')),
+                    ];
 
-              if (snapshot.hasData) {
-                for (var doc in snapshot.data!.docs) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final id = data['employeeId'] ?? '';
-                  final name = data['fullName'] ?? 'Staff';
-                  final code = data['employeeCode'] ?? '';
-                  items.add(DropdownMenuItem(value: id, child: Text('$name ($code)')));
-                }
-              }
+                    if (snapshot.hasData) {
+                      for (var doc in snapshot.data!.docs) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final id = data['employeeId'] ?? '';
+                        final name = data['fullName'] ?? 'Staff';
+                        final code = data['employeeCode'] ?? '';
+                        items.add(DropdownMenuItem(value: id, child: Text('$name ($code)')));
+                      }
+                    }
 
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                decoration: BoxDecoration(
-                  color: AppColors.inputBgDark,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.cardBorderDark),
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: AppColors.inputBgDark,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.cardBorderDark),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          dropdownColor: AppColors.cardDark,
+                          isExpanded: true,
+                          value: _selectedEmployeeId ?? '',
+                          style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                          items: items,
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedEmployeeId = (val == null || val.isEmpty) ? null : val;
+                            });
+                          },
+                        ),
+                      ),
+                    );
+                  },
                 ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    dropdownColor: AppColors.cardDark,
-                    isExpanded: true,
-                    value: _selectedEmployeeId ?? '',
-                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
-                    items: items,
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedEmployeeId = (val == null || val.isEmpty) ? null : val;
-                      });
-                    },
-                  ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.kesariSaffron,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-              );
-            },
+                icon: const Icon(Icons.add_location_alt_rounded, color: Colors.white, size: 18),
+                label: const Text('🎉 ADD HOLIDAY', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: _showAddHolidayDialog,
+              ),
+            ],
           ),
         ],
       ),
@@ -279,7 +453,7 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
     );
   }
 
-  Widget _buildCalendarGrid(List<AttendanceModel> records) {
+  Widget _buildCalendarGrid(List<AttendanceModel> records, List<HolidayModel> holidays) {
     final int daysInMonth = DateUtils.getDaysInMonth(_selectedMonth.year, _selectedMonth.month);
     final firstDayOfWeek = DateTime(_selectedMonth.year, _selectedMonth.month, 1).weekday; // 1 = Mon, 7 = Sun
 
@@ -287,6 +461,12 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
     final Map<String, List<AttendanceModel>> dayMap = {};
     for (var r in records) {
       dayMap.putIfAbsent(r.date, () => []).add(r);
+    }
+
+    // Build map date string -> holiday title
+    final Map<String, String> holidayMap = {};
+    for (var h in holidays) {
+      holidayMap[h.date] = h.title;
     }
 
     return Container(
@@ -331,10 +511,12 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
               final dayNum = index - (firstDayOfWeek - 2);
               final dateStr = '${_selectedMonth.year}-${_selectedMonth.month.toString().padLeft(2, '0')}-${dayNum.toString().padLeft(2, '0')}';
               final dayRecords = dayMap[dateStr] ?? [];
+              final holidayTitle = holidayMap[dateStr];
+              final isHoliday = holidayTitle != null;
 
-              Color bg = AppColors.inputBgDark;
-              Color border = AppColors.cardBorderDark;
-              String statusDot = '';
+              Color bg = isHoliday ? AppColors.haldiGold.withValues(alpha: 0.15) : AppColors.inputBgDark;
+              Color border = isHoliday ? AppColors.haldiGold : AppColors.cardBorderDark;
+              String statusDot = isHoliday ? '🎉' : '';
 
               if (dayRecords.isNotEmpty) {
                 final hasPending = dayRecords.any((r) => r.approvalStatus == 'PENDING');
@@ -348,7 +530,7 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
                 } else if (hasApproved || hasPresent) {
                   bg = AppColors.pannaEmerald.withValues(alpha: 0.2);
                   border = AppColors.pannaEmerald;
-                  statusDot = '✓';
+                  statusDot = isHoliday ? '🎉✓' : '✓';
                 } else {
                   bg = AppColors.sindoorRed.withValues(alpha: 0.2);
                   border = AppColors.sindoorRed;
@@ -357,7 +539,7 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
               }
 
               return InkWell(
-                onTap: dayRecords.isEmpty ? null : () => _showDayDetailDialog(dateStr, dayRecords),
+                onTap: (dayRecords.isEmpty && !isHoliday) ? null : () => _showDayDetailDialog(dateStr, dayRecords, holidayTitle),
                 child: Container(
                   decoration: BoxDecoration(
                     color: bg,
@@ -381,35 +563,145 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
     );
   }
 
-  void _showDayDetailDialog(String dateStr, List<AttendanceModel> records) {
+  void _showDayDetailDialog(String dateStr, List<AttendanceModel> records, String? holidayTitle) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.cardDark,
-        title: Text('Attendance Log: $dateStr', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Attendance Log: $dateStr', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+            if (holidayTitle != null)
+              Container(
+                margin: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: AppColors.haldiGold.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
+                child: Text('🎉 Shop Holiday: $holidayTitle', style: GoogleFonts.inter(color: AppColors.haldiGold, fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+          ],
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: records.map((r) {
-              return ListTile(
-                title: Text(r.employeeName, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-                subtitle: Text(
-                  'Check-In: ${r.checkInTime != null ? DateFormat('hh:mm a').format(r.checkInTime!) : "N/A"}'
-                  '${r.lateReason != null ? "\nReason: ${r.lateReason}" : ""}',
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                ),
-                trailing: Chip(
-                  label: Text(r.status, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                  backgroundColor: r.status == AppConstants.attendancePresent ? AppColors.pannaEmerald : AppColors.sindoorRed,
-                ),
-              );
-            }).toList(),
+            children: records.isEmpty
+                ? [
+                    const Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Text('No attendance recorded on this day.', style: TextStyle(color: AppColors.textMuted)),
+                    )
+                  ]
+                : records.map((r) {
+                    return ListTile(
+                      title: Text(r.employeeName, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+                      subtitle: Text(
+                        'Check-In: ${r.checkInTime != null ? DateFormat('hh:mm a').format(r.checkInTime!) : "N/A"}'
+                        '${r.isHolidayWork ? "\n⭐ Worked on Holiday" : ""}'
+                        '${r.lateReason != null ? "\nReason: ${r.lateReason}" : ""}',
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                      ),
+                      trailing: Chip(
+                        label: Text(r.status, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                        backgroundColor: r.status == AppConstants.attendancePresent ? AppColors.pannaEmerald : AppColors.sindoorRed,
+                      ),
+                    );
+                  }).toList(),
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CLOSE')),
         ],
       ),
+    );
+  }
+
+  Widget _buildPendingHolidayBonusList(List<AttendanceModel> list) {
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: list.length,
+      itemBuilder: (context, index) {
+        final att = list[index];
+        final bonusCtrl = TextEditingController(text: '500');
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.cardDark,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.haldiGold.withValues(alpha: 0.6)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.celebration_rounded, color: AppColors.haldiGold, size: 20),
+                      const SizedBox(width: 8),
+                      Text(att.employeeName, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: AppColors.haldiGold.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
+                    child: Text('Holiday Work', style: GoogleFonts.inter(color: AppColors.haldiGold, fontWeight: FontWeight.bold, fontSize: 11)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text('Date: ${att.date}  |  Attended on Shop Holiday!', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
+              const SizedBox(height: 12),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: bonusCtrl,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                      decoration: InputDecoration(
+                        labelText: 'Extra Bonus Amount (₹)',
+                        labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                        filled: true,
+                        fillColor: AppColors.inputBgDark,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.pannaEmerald,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+                    label: const Text('APPROVE BONUS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                    onPressed: () {
+                      final b = double.tryParse(bonusCtrl.text.trim()) ?? 500.0;
+                      _updateHolidayBonus(att, true, b);
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.sindoorRed),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: const Text('NO BONUS', style: TextStyle(color: AppColors.sindoorRed, fontWeight: FontWeight.bold, fontSize: 11)),
+                    onPressed: () => _updateHolidayBonus(att, false, 0.0),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -532,3 +824,4 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
     );
   }
 }
+

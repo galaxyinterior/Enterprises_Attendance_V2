@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
+
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/auth_routing_service.dart';
 import '../../models/employee_model.dart';
+import '../../models/advance_salary_model.dart';
+import '../../models/attendance_model.dart';
 import '../auth/login_screen.dart';
 import 'add_employee_screen.dart';
 import 'edit_employee_screen.dart';
@@ -744,6 +748,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildPayrollUdhaarTab() {
+    final now = DateTime.now();
+    final monthPrefix = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
+
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -752,18 +760,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Payroll & Monthly Payslips', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.pannaEmerald),
-                icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white, size: 18),
-                label: const Text('PAYSLIP PDF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                onPressed: () => _showPayslipModal(),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Payroll & Salary Advance (Udhaar)', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                  Text('${DateFormat('MMMM yyyy').format(now)} Payslip Calculation', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSaffron)),
+                ],
+              ),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.kesariSaffron),
+                    icon: const Icon(Icons.request_quote_rounded, color: Colors.white, size: 18),
+                    label: const Text('💸 GRANT ADVANCE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    onPressed: () => _showGrantAdvanceDialog(),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.pannaEmerald),
+                    icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white, size: 18),
+                    label: const Text('PAYSLIP PDF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    onPressed: () => _showPayslipModal(),
+                  ),
+                ],
               ),
             ],
           ),
           const SizedBox(height: 16),
 
-          // Real Live Firestore Employee Payroll List
+          // Streams for Employees, Advances, and Attendance
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -771,71 +796,418 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   .doc(widget.businessId)
                   .collection(AppConstants.colEmployees)
                   .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.kesariSaffron));
+              builder: (context, empSnap) {
+                if (!empSnap.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.kesariSaffron));
 
-                final docs = snapshot.data!.docs;
-                if (docs.isEmpty) {
+                final empDocs = empSnap.data!.docs;
+                final employees = empDocs.map((d) => EmployeeModel.fromMap(d.data() as Map<String, dynamic>)).toList();
+
+                if (employees.isEmpty) {
                   return Center(child: Text('No employees found to calculate payroll.', style: GoogleFonts.inter(color: AppColors.textMuted)));
                 }
 
-                double totalGrossSalary = 0;
-                for (var doc in docs) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  totalGrossSalary += (data['monthlySalary'] ?? 0.0).toDouble();
-                }
+                return StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection(AppConstants.colBusinesses)
+                      .doc(widget.businessId)
+                      .collection('advances')
+                      .snapshots(),
+                  builder: (context, advSnap) {
+                    final advDocs = advSnap.data?.docs ?? [];
+                    final advances = advDocs.map((d) => AdvanceSalaryModel.fromMap(d.data() as Map<String, dynamic>)).toList();
 
-                return Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        color: AppColors.cardDark,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.cardBorderDark),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Total Monthly Staff Payroll:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
-                              Text('₹${totalGrossSalary.toStringAsFixed(0)}', style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontSize: 22, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          Chip(
-                            label: Text('${docs.length} Active Staff', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                            backgroundColor: AppColors.kesariSaffron,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: docs.length,
-                        itemBuilder: (context, idx) {
-                          final emp = EmployeeModel.fromMap(docs[idx].data() as Map<String, dynamic>);
-                          return Card(
-                            color: AppColors.cardDark,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            child: ListTile(
-                              leading: const CircleAvatar(backgroundColor: AppColors.haldiGold, child: Icon(Icons.payments_outlined, color: Colors.white)),
-                              title: Text(emp.fullName, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-                              subtitle: Text('Base Salary: ₹${emp.monthlySalary.toStringAsFixed(0)}/month', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
-                              trailing: Text('Net: ₹${emp.monthlySalary.toStringAsFixed(0)}', style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontWeight: FontWeight.bold, fontSize: 15)),
+                    return StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection(AppConstants.colBusinesses)
+                          .doc(widget.businessId)
+                          .collection(AppConstants.colAttendance)
+                          .snapshots(),
+                      builder: (context, attSnap) {
+                        final attDocs = attSnap.data?.docs ?? [];
+                        final allAtt = attDocs.map((d) => AttendanceModel.fromMap(d.data() as Map<String, dynamic>)).toList();
+
+                        // Filter attendance for current month
+                        final monthAtt = allAtt.where((r) => r.date.startsWith(monthPrefix)).toList();
+
+                        double totalGrossSalary = 0;
+                        double totalAdvancesGiven = 0;
+                        double totalNetPayable = 0;
+
+                        final Map<String, int> empPresentDays = {};
+                        final Map<String, double> empHolidayBonus = {};
+                        final Map<String, double> empAdvanceTotal = {};
+
+                        for (var e in employees) {
+                          totalGrossSalary += e.monthlySalary;
+                        }
+
+                        for (var a in advances) {
+                          if (a.date.startsWith(monthPrefix)) {
+                            totalAdvancesGiven += a.amount;
+                            empAdvanceTotal[a.employeeId] = (empAdvanceTotal[a.employeeId] ?? 0.0) + a.amount;
+                          }
+                        }
+
+                        for (var att in monthAtt) {
+                          if (att.status == AppConstants.attendancePresent || att.approvalStatus == 'APPROVED') {
+                            empPresentDays[att.employeeId] = (empPresentDays[att.employeeId] ?? 0) + 1;
+                          }
+                          if (att.holidayBonusStatus == 'APPROVED') {
+                            empHolidayBonus[att.employeeId] = (empHolidayBonus[att.employeeId] ?? 0.0) + att.holidayBonusAmount;
+                          }
+                        }
+
+                        return Column(
+                          children: [
+                            // Summary Cards Header Row
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppColors.cardDark,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: AppColors.cardBorderDark),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildPayrollStatTile(
+                                      'Gross Salary Pool',
+                                      '₹${totalGrossSalary.toStringAsFixed(0)}',
+                                      AppColors.haldiGold,
+                                      Icons.account_balance_rounded,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _buildPayrollStatTile(
+                                      'Udhaar / Advances Taken',
+                                      '₹${totalAdvancesGiven.toStringAsFixed(0)}',
+                                      AppColors.sindoorRed,
+                                      Icons.request_quote_rounded,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _buildPayrollStatTile(
+                                      'Active Staff',
+                                      '${employees.length} Staff',
+                                      AppColors.kesariSaffron,
+                                      Icons.people_alt_rounded,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+                            const SizedBox(height: 16),
+
+                            Expanded(
+                              child: ListView.builder(
+                                itemCount: employees.length,
+                                itemBuilder: (context, idx) {
+                                  final emp = employees[idx];
+                                  final present = empPresentDays[emp.employeeId] ?? 0;
+                                  final bonus = empHolidayBonus[emp.employeeId] ?? 0.0;
+                                  final advance = empAdvanceTotal[emp.employeeId] ?? 0.0;
+
+                                  final dailyRate = emp.monthlySalary / daysInMonth;
+                                  final earnedBase = dailyRate * present;
+                                  final netPayable = (earnedBase + bonus - advance).clamp(0.0, 999999.0);
+
+                                  return Card(
+                                    color: AppColors.cardDark,
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      side: const BorderSide(color: AppColors.cardBorderDark),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(14.0),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  CircleAvatar(
+                                                    backgroundColor: AppColors.kesariSaffron,
+                                                    child: Text(emp.fullName.isNotEmpty ? emp.fullName[0].toUpperCase() : 'E', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(emp.fullName, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+                                                      Text('Code: ${emp.employeeCode} | Monthly Base: ₹${emp.monthlySalary.toStringAsFixed(0)}', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                              OutlinedButton.icon(
+                                                style: OutlinedButton.styleFrom(
+                                                  side: const BorderSide(color: AppColors.haldiGold),
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                ),
+                                                icon: const Icon(Icons.add_rounded, size: 14, color: AppColors.haldiGold),
+                                                label: const Text('+ ADVANCE', style: TextStyle(color: AppColors.haldiGold, fontSize: 11, fontWeight: FontWeight.bold)),
+                                                onPressed: () => _showGrantAdvanceDialog(preSelectedEmployeeId: emp.employeeId),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 12),
+                                          const Divider(color: AppColors.cardBorderDark, height: 1),
+                                          const SizedBox(height: 10),
+
+                                          // Breakdown Row
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              _buildSalaryChip('Present Days', '$present/$daysInMonth days', AppColors.pannaEmerald),
+                                              _buildSalaryChip('Earned Base', '₹${earnedBase.toStringAsFixed(0)}', AppColors.textPrimary),
+                                              if (bonus > 0)
+                                                _buildSalaryChip('Holiday Bonus', '+₹${bonus.toStringAsFixed(0)}', AppColors.haldiGold),
+                                              if (advance > 0)
+                                                _buildSalaryChip('Udhaar Deducted', '-₹${advance.toStringAsFixed(0)}', AppColors.sindoorRed),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 10),
+
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Text('Net Payable Salary (This Month):', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600)),
+                                              Text('₹${netPayable.toStringAsFixed(0)}', style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontSize: 18, fontWeight: FontWeight.bold)),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
                 );
               },
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPayrollStatTile(String title, String value, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 16),
+              const SizedBox(width: 6),
+              Expanded(child: Text(title, style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 10), overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(value, style: GoogleFonts.outfit(color: color, fontSize: 16, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSalaryChip(String label, String value, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 10)),
+        Text(value, style: GoogleFonts.inter(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
+  void _showGrantAdvanceDialog({String? preSelectedEmployeeId}) {
+    final amountCtrl = TextEditingController();
+    final reasonCtrl = TextEditingController();
+    String? selectedEmpId = preSelectedEmployeeId;
+    DateTime advanceDate = DateTime.now();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          backgroundColor: AppColors.cardDark,
+          title: Text('💸 Grant Salary Advance (Udhaar)', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection(AppConstants.colBusinesses)
+                      .doc(widget.businessId)
+                      .collection(AppConstants.colEmployees)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    List<DropdownMenuItem<String>> items = [];
+                    if (snapshot.hasData) {
+                      for (var doc in snapshot.data!.docs) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final id = data['employeeId'] ?? '';
+                        final name = data['fullName'] ?? 'Staff';
+                        items.add(DropdownMenuItem(value: id, child: Text(name)));
+                      }
+                    }
+
+                    if (selectedEmpId == null && items.isNotEmpty) {
+                      selectedEmpId = items.first.value;
+                    }
+
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: AppColors.inputBgDark,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.cardBorderDark),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          dropdownColor: AppColors.cardDark,
+                          isExpanded: true,
+                          value: selectedEmpId,
+                          style: const TextStyle(color: AppColors.textPrimary),
+                          items: items,
+                          onChanged: (val) {
+                            if (val != null) setDlgState(() => selectedEmpId = val);
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    labelText: 'Advance Amount (₹)',
+                    labelStyle: const TextStyle(color: AppColors.textMuted),
+                    filled: true,
+                    fillColor: AppColors.inputBgDark,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: reasonCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    labelText: 'Reason for Advance (e.g. Emergency, Rent)',
+                    labelStyle: const TextStyle(color: AppColors.textMuted),
+                    filled: true,
+                    fillColor: AppColors.inputBgDark,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                InkWell(
+                  onTap: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: advanceDate,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2035),
+                    );
+                    if (d != null) setDlgState(() => advanceDate = d);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.inputBgDark,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.cardBorderDark),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today_rounded, color: AppColors.haldiGold, size: 18),
+                        const SizedBox(width: 8),
+                        Text('Date: ${DateFormat('dd MMM yyyy').format(advanceDate)}', style: const TextStyle(color: AppColors.textPrimary)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.kesariSaffron),
+              child: const Text('GRANT ADVANCE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              onPressed: () async {
+                final amt = double.tryParse(amountCtrl.text.trim());
+                if (amt == null || amt <= 0 || selectedEmpId == null) return;
+
+                final String id = const Uuid().v4();
+                final String dateStr = DateFormat('yyyy-MM-dd').format(advanceDate);
+
+                // Get employee name
+                final empDoc = await FirebaseFirestore.instance
+                    .collection(AppConstants.colBusinesses)
+                    .doc(widget.businessId)
+                    .collection(AppConstants.colEmployees)
+                    .doc(selectedEmpId)
+                    .get();
+
+                final empName = (empDoc.data() ?? {})['fullName'] ?? 'Staff';
+
+                final advModel = AdvanceSalaryModel(
+                  id: id,
+                  businessId: widget.businessId,
+                  employeeId: selectedEmpId!,
+                  employeeName: empName,
+                  amount: amt,
+                  date: dateStr,
+                  reason: reasonCtrl.text.trim(),
+                  status: 'APPROVED',
+                  createdAt: DateTime.now(),
+                );
+
+                await FirebaseFirestore.instance
+                    .collection(AppConstants.colBusinesses)
+                    .doc(widget.businessId)
+                    .collection('advances')
+                    .doc(id)
+                    .set(advModel.toMap());
+
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('💸 Advance Salary of ₹${amt.toStringAsFixed(0)} recorded for $empName!'),
+                      backgroundColor: AppColors.pannaEmerald,
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
