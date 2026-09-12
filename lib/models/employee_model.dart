@@ -16,6 +16,9 @@ class EmployeeModel {
   final double monthlySalary;
   final double dailySalary;
   final double hourlyRate;
+  final int casualLeaveBalance;
+  final int sickLeaveBalance;
+  final int paidLeaveBalance;
   final bool active;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -38,6 +41,9 @@ class EmployeeModel {
     this.monthlySalary = 0.0,
     this.dailySalary = 0.0,
     this.hourlyRate = 0.0,
+    this.casualLeaveBalance = 12,
+    this.sickLeaveBalance = 6,
+    this.paidLeaveBalance = 15,
     this.active = true,
     required this.createdAt,
     required this.updatedAt,
@@ -62,6 +68,9 @@ class EmployeeModel {
       'monthlySalary': monthlySalary,
       'dailySalary': dailySalary,
       'hourlyRate': hourlyRate,
+      'casualLeaveBalance': casualLeaveBalance,
+      'sickLeaveBalance': sickLeaveBalance,
+      'paidLeaveBalance': paidLeaveBalance,
       'active': active,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -91,6 +100,9 @@ class EmployeeModel {
       monthlySalary: (map['monthlySalary'] ?? 0.0).toDouble(),
       dailySalary: (map['dailySalary'] ?? 0.0).toDouble(),
       hourlyRate: (map['hourlyRate'] ?? 0.0).toDouble(),
+      casualLeaveBalance: map['casualLeaveBalance'] ?? 12,
+      sickLeaveBalance: map['sickLeaveBalance'] ?? 6,
+      paidLeaveBalance: map['paidLeaveBalance'] ?? 15,
       active: map['active'] ?? true,
       createdAt: map['createdAt'] != null
           ? DateTime.parse(map['createdAt'])
