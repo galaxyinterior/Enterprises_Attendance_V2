@@ -501,16 +501,36 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     });
 
     try {
-      List<double>? targetVector = await _faceService.processFaceFromBytes(
-        bytes,
-        tempPath,
+      final res = await _faceService.processFaceFromBytesDetailed(
+        bytes: bytes,
+        tempFilePath: tempPath,
         context: 'KIOSK',
       );
 
-      if (targetVector == null || targetVector.isEmpty) {
-        debugPrint('Face vector extraction returned empty, skipping frame...');
+      final int facesCount = res['facesDetected'] as int? ?? 0;
+      if (facesCount > 1) {
+        await _voiceService.speakAlert('Only one person should stand in front of the kiosk.');
+        setState(() {
+          _lastRecognizedEmployee = null;
+          _lastRecognizedName = null;
+          _noMatchFound = true;
+          _scanFailureReason = 'Multiple faces detected in camera view ($facesCount faces).';
+          _statusMessage = '⚠️ Only one person should stand in front of the kiosk.';
+        });
         return;
       }
+
+      if (res['success'] != true || res['embedding'] == null) {
+        final String err = res['error'] as String? ?? 'Position face clearly';
+        if (facesCount == 1) {
+          setState(() {
+            _statusMessage = '⚠️ $err';
+          });
+        }
+        return;
+      }
+
+      final List<double> targetVector = res['embedding'] as List<double>;
 
       // Step 1: Perform 100% offline local SQLite memory match against pre-loaded RAM cache
       var match = _faceService.matchFace(
