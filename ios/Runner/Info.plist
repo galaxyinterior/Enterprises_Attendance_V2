@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is required for real-time face verification and employee enrollment.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is required for voice announcements and custom voice recording.</string>
 </dict>
 </plist>
