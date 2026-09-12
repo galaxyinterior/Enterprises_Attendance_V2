@@ -21,13 +21,6 @@ import '../../models/attendance_model.dart';
 import '../../models/shift_model.dart';
 import '../auth/login_screen.dart';
 
-enum BlinkState {
-  waitingForOpen,
-  eyesOpen,
-  eyesClosed,
-  blinkConfirmed,
-}
-
 class KioskAttendanceScreen extends StatefulWidget {
   final String shopId;
   final String businessId;
@@ -72,15 +65,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
   bool _isAttendanceMarked = false;
 
-  // Session Lock State for Instant Face Preview & Eye Blink Logging
+  // Session Lock State for Instant Face Match & Attendance Logging
   Map<String, dynamic>? _lockedEmployee;
-  String? _lockedEmployeeName;
   DateTime? _sessionLockTime;
   bool _isFinalizingAttendance = false;
-
-  // Blink Liveness State Machine
-  BlinkState _blinkState = BlinkState.waitingForOpen;
-  int _openEyeFrameCount = 0;
 
   /// Production Switch: Enforce active eye blink & head micro-movement anti-spoofing
   bool requireLivenessForRecognition = true;
@@ -210,7 +198,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
   void _resetSessionLock() {
     _lockedEmployee = null;
-    _lockedEmployeeName = null;
     _sessionLockTime = null;
     _isProcessing = false;
     _isFinalizingAttendance = false;
@@ -362,105 +349,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE (DO NOT RE-RUN MATCHING)
       // =========================================================================
       if (_lockedEmployee != null) {
-        final empName = _lockedEmployeeName ?? 'Employee';
-        final String empId = _lockedEmployee!['employeeId'] ?? 'N/A';
-
         if (_isAttendanceMarked || _isFinalizingAttendance) {
           return;
         }
-
-        final bool hasClassification = res['hasClassificationData'] as bool? ?? false;
-        final double? leftOpen = res['leftEyeOpen'] as double?;
-        final double? rightOpen = res['rightEyeOpen'] as double?;
-
-        if (!hasClassification || leftOpen == null || rightOpen == null) {
-          debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
-          debugPrint('state=LIVENESS_DATA_UNAVAILABLE');
-          debugPrint('employeeId=$empId');
-          debugPrint('locked=true');
-          debugPrint('blinkState=${_blinkState.name}');
-          if (mounted) {
-            setState(() {
-              _faceDetectedInFrame = true;
-              _statusMessage = '👀 Welcome $empName! Look directly at camera to detect eyes.';
-            });
-          }
-          return;
-        }
-
-        final bool eyesAreOpen = (leftOpen >= 0.65 && rightOpen >= 0.65);
-        final bool eyesAreClosed = (leftOpen <= 0.35 && rightOpen <= 0.35);
-
-        // Blink Liveness State Machine Evaluation
-        switch (_blinkState) {
-          case BlinkState.waitingForOpen:
-            if (eyesAreOpen) {
-              _openEyeFrameCount++;
-              if (_openEyeFrameCount >= 1) {
-                _blinkState = BlinkState.eyesOpen;
-                debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
-                debugPrint('state=TRANSITION');
-                debugPrint('employeeId=$empId');
-                debugPrint('blinkState=EYES_OPEN');
-              }
-            }
-            break;
-
-          case BlinkState.eyesOpen:
-            if (eyesAreClosed) {
-              _blinkState = BlinkState.eyesClosed;
-              debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
-              debugPrint('state=TRANSITION');
-              debugPrint('employeeId=$empId');
-              debugPrint('blinkState=EYES_CLOSED');
-            }
-            break;
-
-          case BlinkState.eyesClosed:
-            if (eyesAreOpen) {
-              _blinkState = BlinkState.blinkConfirmed;
-              debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
-              debugPrint('state=TRANSITION');
-              debugPrint('employeeId=$empId');
-              debugPrint('blinkState=BLINK_CONFIRMED');
-            }
-            break;
-
-          case BlinkState.blinkConfirmed:
-            break;
-        }
-
-        final sessionAgeMs = _sessionLockTime != null
-            ? DateTime.now().difference(_sessionLockTime!).inMilliseconds
-            : 0;
-
-        debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
-        debugPrint('state=EVALUATING_LIVENESS');
-        debugPrint('employeeId=$empId');
-        debugPrint('faceDetected=true');
-        debugPrint('matched=true');
-        debugPrint('locked=true');
-        debugPrint('liveness=true');
-        debugPrint('blinkState=${_blinkState.name}');
-        debugPrint('isProcessing=$_isProcessing');
-        debugPrint('isFinalizingAttendance=$_isFinalizingAttendance');
-        debugPrint('sessionAgeMs=$sessionAgeMs');
-
-        if (_blinkState == BlinkState.blinkConfirmed) {
-          debugPrint('FINALIZE_TRIGGERED');
-          debugPrint('employeeId=$empId');
-          debugPrint('trigger=BLINK_CONFIRMED');
-          await _finalizeAttendanceForLockedEmployee();
-          return;
-        }
-
-        // Still waiting for blink confirmation
-        if (mounted) {
-          setState(() {
-            _faceDetectedInFrame = true;
-            _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to confirm & mark attendance!';
-          });
-        }
+        await _finalizeAttendanceForLockedEmployee();
         return;
       }
 
@@ -515,30 +407,23 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             if (mounted) {
               setState(() {
                 _lockedEmployee = match;
-                _lockedEmployeeName = empName;
                 _lastRecognizedEmployee = empData;
                 _lastRecognizedName = empName;
                 _sessionLockTime = DateTime.now();
-                _blinkState = BlinkState.waitingForOpen;
-                _openEyeFrameCount = 0;
                 _isAttendanceMarked = false;
                 _noMatchFound = false;
                 _scanFailureReason = null;
-                _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to log attendance!';
+                _statusMessage = '👀 Welcome $empName! Logging attendance...';
               });
 
               debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
               debugPrint('state=EMPLOYEE_LOCKED');
               debugPrint('employeeId=$empId');
-              debugPrint('faceDetected=true');
               debugPrint('matched=true');
               debugPrint('locked=true');
-              debugPrint('blinkState=WAITING_FOR_OPEN');
             }
 
-            try {
-              _voiceService.speakLivenessPrompt();
-            } catch (_) {}
+            await _finalizeAttendanceForLockedEmployee();
             return;
           } else {
             if (mounted) {
@@ -1359,7 +1244,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                 // Live Camera Circle Scanner
                 GestureDetector(
                   onTap: () {
-                    if (!_isProcessing && _cameraController != null && _cameraController!.value.isInitialized) {
+                    if (_lockedEmployee != null && !_isFinalizingAttendance) {
+                      _finalizeAttendanceForLockedEmployee();
+                    } else if (!_isProcessing && _cameraController != null && _cameraController!.value.isInitialized) {
                       _autoDetectFrame();
                     }
                   },
