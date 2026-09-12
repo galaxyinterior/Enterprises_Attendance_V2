@@ -1,0 +1,55 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isMaster() {
+      return isSignedIn() && (
+        (request.auth.token.keys().hasAll(['role']) && request.auth.token.role == 'MASTER') ||
+        (firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) && getUserData().role == 'MASTER')
+      );
+    }
+
+    function isTenantUser(businessId) {
+      return isSignedIn() && (
+        isMaster() ||
+        (request.auth.token.keys().hasAll(['businessId']) && request.auth.token.businessId == businessId) ||
+        (firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) && getUserData().businessId == businessId)
+      );
+    }
+
+    function isShopAdmin(businessId) {
+      return isSignedIn() && (
+        isMaster() ||
+        (
+          (request.auth.token.keys().hasAll(['role', 'businessId']) && request.auth.token.role == 'SHOP_ADMIN' && request.auth.token.businessId == businessId) ||
+          (firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) && getUserData().role == 'SHOP_ADMIN' && getUserData().businessId == businessId)
+        )
+      );
+    }
+
+    // Business storage assets (employee photos, biometric assets, voice announcements)
+    match /businesses/{businessId}/{allPaths=**} {
+      allow read: if isTenantUser(businessId);
+      allow write: if isShopAdmin(businessId) || isMaster();
+    }
+
+    // General user profiles
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isSignedIn() && (request.auth.uid == userId || isMaster());
+    }
+
+    // Deny all other unauthenticated or cross-tenant access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

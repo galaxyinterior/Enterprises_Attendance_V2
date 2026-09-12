@@ -8,10 +8,10 @@ class EmailNotificationService {
   factory EmailNotificationService() => _instance;
   EmailNotificationService._internal();
 
-  // Gmail SMTP credentials
-  static const String _smtpUser = 'akmtechofficial@gmail.com';
-  static const String _smtpPassword = 'zynz isfx bmhd smvw';
-  static const String _masterEmail = 'akmtechofficial@gmail.com';
+  // SMTP credentials (passed via build environment or serverless backend)
+  static const String _smtpUser = String.fromEnvironment('SMTP_USER', defaultValue: '');
+  static const String _smtpPassword = String.fromEnvironment('SMTP_PASSWORD', defaultValue: '');
+  static const String _masterEmail = String.fromEnvironment('MASTER_EMAIL', defaultValue: 'master@admin.com');
 
   Future<bool> sendNewRegistrationAlert(RegistrationRequestModel request) async {
     final smtpServer = gmail(_smtpUser, _smtpPassword);

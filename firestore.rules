@@ -1,77 +1,114 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper functions for Security & Tenant Isolation
-    function isAuthenticated() {
+
+    // Helper Functions
+    function isSignedIn() {
       return request.auth != null;
     }
-    
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function isMaster() {
-      return isAuthenticated() && (
-        request.auth.token.role == 'MASTER' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'MASTER'
+      return isSignedIn() && (
+        (request.auth.token.keys().hasAll(['role']) && request.auth.token.role == 'MASTER') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'MASTER')
       );
     }
-    
-    function isBusinessAdmin(businessId) {
-      return isAuthenticated() && (
+
+    function isShopAdmin(businessId) {
+      return isSignedIn() && (
         isMaster() ||
         (
-          request.auth.token.businessId == businessId &&
-          (request.auth.token.role == 'ADMIN' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
+          (request.auth.token.keys().hasAll(['role', 'businessId']) && request.auth.token.role == 'SHOP_ADMIN' && request.auth.token.businessId == businessId) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'SHOP_ADMIN' && getUserData().businessId == businessId)
         )
       );
     }
-    
-    function isBusinessMember(businessId) {
-      return isAuthenticated() && (
+
+    function isKiosk(businessId) {
+      return isSignedIn() && (
         isMaster() ||
-        request.auth.token.businessId == businessId ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
+        isShopAdmin(businessId) ||
+        (
+          (request.auth.token.keys().hasAll(['role', 'businessId']) && request.auth.token.role == 'KIOSK' && request.auth.token.businessId == businessId) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'KIOSK' && getUserData().businessId == businessId)
+        )
       );
     }
 
-    // Public registration requests (created on application submission, processed by Master)
-    match /registrationrequests/{requestId} {
-      allow create: if true;
+    // User Profile Documents
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isMaster());
+      allow write: if isMaster();
+    }
+
+    // Shop Registration Requests
+    match /shop_registrations/{requestId} {
+      allow create: if true; // Public submission of registration form
       allow read, update, delete: if isMaster();
     }
 
-    // Businesses collection & Tenant isolation
+    // System-wide Master Audit Logs
+    match /master_audit_logs/{logId} {
+      allow read, write: if isMaster();
+    }
+
+    // Business Tenant Hierarchy
     match /businesses/{businessId} {
-      allow read: if isBusinessMember(businessId);
-      allow write: if isMaster();
-      
-      // Employees subcollection
+      allow read: if isKiosk(businessId);
+      allow create, update, delete: if isMaster();
+
+      // Employees Sub-collection
       match /employees/{employeeId} {
-        allow read: if isBusinessMember(businessId);
-        allow write: if isBusinessAdmin(businessId);
+        allow read: if isKiosk(businessId);
+        allow write: if isShopAdmin(businessId); // Employees cannot modify themselves
       }
-      
-      // Attendance logs subcollection
+
+      // Shift Configuration Sub-collection
+      match /shifts/{shiftId} {
+        allow read: if isKiosk(businessId);
+        allow write: if isShopAdmin(businessId);
+      }
+
+      // Attendance Records Sub-collection
       match /attendance/{attendanceId} {
-        allow read: if isBusinessMember(businessId);
-        allow create: if isBusinessMember(businessId);
-        allow update, delete: if isBusinessAdmin(businessId);
+        allow read: if isKiosk(businessId);
+        allow create: if isKiosk(businessId); // Kiosks can log new check-ins
+        allow update, delete: if isShopAdmin(businessId); // Kiosks cannot alter/rewrite existing attendance history
       }
-    }
-    
-    // Top-level stores/employees/attendance_logs collections (for cross-compatible access)
-    match /stores/{storeId} {
-      allow read, write: if isAuthenticated();
-    }
-    match /employees/{employeeId} {
-      allow read, write: if isAuthenticated();
-    }
-    match /attendance_logs/{logId} {
-      allow read, write: if isAuthenticated();
-    }
-    
-    // User role mappings
-    match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isMaster());
-      allow write: if isMaster();
+
+      // Shop Calendar Holidays
+      match /holidays/{holidayId} {
+        allow read: if isKiosk(businessId);
+        allow write: if isShopAdmin(businessId);
+      }
+
+      // Salary Advances / Udhaar
+      match /advances/{advanceId} {
+        allow read: if isShopAdmin(businessId);
+        allow write: if isShopAdmin(businessId);
+      }
+
+      // Live Voice & Text Announcements
+      match /announcements/{announcementId} {
+        allow read: if isKiosk(businessId);
+        allow write: if isShopAdmin(businessId);
+      }
+
+      // Kiosk Terminal Registrations
+      match /devices/{deviceId} {
+        allow read: if isKiosk(businessId);
+        allow write: if isShopAdmin(businessId);
+      }
+
+      // Tenant Audit Logs
+      match /audit_logs/{logId} {
+        allow read: if isShopAdmin(businessId);
+        allow create, update, delete: if isShopAdmin(businessId);
+      }
     }
   }
 }

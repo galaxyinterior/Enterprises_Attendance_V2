@@ -47,23 +47,6 @@ class AuthRoutingService {
     String businessId = prefs.getString(keyBusinessId) ?? '';
     String email = prefs.getString(keyEmail) ?? firebaseUser?.email ?? '';
 
-    // If SharedPreferences role is empty, infer from Firebase email format
-    if (role.isEmpty && email.isNotEmpty) {
-      if (email.endsWith('@kiosk.in')) {
-        role = AppConstants.roleKiosk;
-        shopId = email.split('@').first.toUpperCase();
-        businessId = shopId;
-      } else if (email.endsWith('@admin.in')) {
-        role = AppConstants.roleShopAdmin;
-        shopId = email.split('@').first.toUpperCase();
-        businessId = shopId;
-      } else if (email == 'master@admin.com') {
-        role = AppConstants.roleMaster;
-        shopId = 'MASTER';
-        businessId = 'MASTER';
-      }
-    }
-
     if (role.isEmpty) return null;
 
     return {
@@ -143,45 +126,21 @@ class AuthRoutingService {
           'shopId': businessId,
         };
       } else {
-        // Check if email format identifies Kiosk or Admin fallback
-        if (cleanEmail.endsWith('@kiosk.in')) {
-          String shopId = cleanEmail.split('@').first.toUpperCase();
-          await saveSession(role: AppConstants.roleKiosk, shopId: shopId, businessId: shopId, email: cleanEmail);
-          return {
-            'role': AppConstants.roleKiosk,
-            'uid': uid,
-            'email': cleanEmail,
-            'shopId': shopId,
-            'businessId': shopId,
-          };
-        } else if (cleanEmail.endsWith('@admin.in')) {
-          String shopId = cleanEmail.split('@').first.toUpperCase();
-          await saveSession(role: AppConstants.roleShopAdmin, shopId: shopId, businessId: shopId, email: cleanEmail);
-          return {
-            'role': AppConstants.roleShopAdmin,
-            'uid': uid,
-            'email': cleanEmail,
-            'shopId': shopId,
-            'businessId': shopId,
-          };
-        } else if (cleanEmail == 'master@admin.com') {
-          await saveSession(role: AppConstants.roleMaster, shopId: 'MASTER', businessId: 'MASTER', email: cleanEmail);
-          return {
-            'role': AppConstants.roleMaster,
-            'uid': uid,
-            'email': cleanEmail,
-          };
-        }
-      }
+        // Fallback: Check ID Token custom claims if Firestore doc is missing
+        final idTokenResult = await credential.user?.getIdTokenResult();
+        final claims = idTokenResult?.claims;
+        final String role = (claims != null && claims['role'] != null) ? claims['role'] : AppConstants.roleShopAdmin;
+        final String businessId = (claims != null && claims['businessId'] != null) ? claims['businessId'] : 'SHOP001';
 
-      await saveSession(role: AppConstants.roleShopAdmin, shopId: 'SHOP001', businessId: 'SHOP001', email: cleanEmail);
-      return {
-        'role': AppConstants.roleShopAdmin,
-        'uid': uid,
-        'email': cleanEmail,
-        'shopId': 'SHOP001',
-        'businessId': 'SHOP001',
-      };
+        await saveSession(role: role, shopId: businessId, businessId: businessId, email: cleanEmail);
+        return {
+          'role': role,
+          'uid': uid,
+          'email': cleanEmail,
+          'businessId': businessId,
+          'shopId': businessId,
+        };
+      }
     } catch (e) {
       throw Exception('Login failed: ${e.toString()}');
     }
