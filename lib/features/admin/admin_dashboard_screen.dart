@@ -1566,7 +1566,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   setState(() {});
                                 }
                               } else {
-                                if (context.mounted) {
+                                if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(content: Text('Microphone permission denied or recording failed.')),
                                   );
