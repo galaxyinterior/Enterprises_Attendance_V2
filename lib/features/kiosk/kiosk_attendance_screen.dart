@@ -212,6 +212,37 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     _statusMessage = '👁️ Position face inside camera circle to scan';
   }
 
+  Future<void> _resetCamera() async {
+    try {
+      _autoScanTimer?.cancel();
+      if (_cameraController != null) {
+        try {
+          await _cameraController!.dispose();
+        } catch (_) {}
+        _cameraController = null;
+      }
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = false;
+          _resetSessionLock();
+          _statusMessage = '🔄 Resetting camera controller...';
+        });
+      }
+      await _initServicesAndCamera();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Camera successfully reset & scanner restarted.'),
+            duration: Duration(seconds: 2),
+            backgroundColor: AppColors.pannaEmerald,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Reset camera error: $e');
+    }
+  }
+
   void _startAutoScanner() {
     _autoScanTimer?.cancel();
     _autoScanTimer = Timer.periodic(const Duration(milliseconds: 800), (_) async {
@@ -254,14 +285,20 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         }
       }
 
-      final xFile = await _cameraController!.takePicture();
+      XFile? xFile;
+      try {
+        xFile = await _cameraController!.takePicture();
+      } catch (e) {
+        debugPrint('Camera takePicture frame skip: $e');
+        return;
+      }
       final bytes = await xFile.readAsBytes();
 
       // Fast ML Kit Face & Blink Detection
       final res = await _faceService.detectFaceAndCheckBlink(xFile.path);
 
       if (res == null || res['hasFace'] != true) {
-        if (_faceDetectedInFrame || _lockedEmployee != null) {
+        if (_faceDetectedInFrame || _lockedEmployee != null || _noMatchFound) {
           if (mounted && !_isAttendanceMarked && !_isFinalizingAttendance) {
             setState(() {
               _resetSessionLock();
@@ -345,7 +382,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                     .toList();
 
                 if (cloudEmps.isNotEmpty) {
-                  await _offlineDb.saveLocalEmployees(cloudEmps);
+                  await _offlineDb.saveLocalEmployees(cloudEmps, businessId: widget.businessId);
                   _enrolledStaffCache = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
                   match = _faceService.matchFace(
                     targetEmbedding: targetVector,
@@ -382,7 +419,16 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                 setState(() {
                   _noMatchFound = true;
                   _scanFailureReason = 'Unregistered Face • Database Connected (${_enrolledStaffCache.length} enrolled staff)';
-                  _statusMessage = '❌ Unregistered Face — No Employee Match Found';
+                  _statusMessage = '❌ Unregistered Face — Auto-resetting in 3s...';
+                });
+
+                // Auto reset _noMatchFound after 3 seconds so new faces can scan!
+                Timer(const Duration(seconds: 3), () {
+                  if (mounted && _noMatchFound) {
+                    setState(() {
+                      _resetSessionLock();
+                    });
+                  }
                 });
               }
             }
@@ -1452,6 +1498,21 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                     style: GoogleFonts.inter(color: AppColors.kesariSaffron, fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                   onPressed: _isManualSyncing ? null : _triggerManualSync,
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.cardDark,
+                    side: BorderSide(color: AppColors.haldiGold.withValues(alpha: 0.8), width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  icon: const Icon(Icons.refresh_rounded, color: AppColors.haldiGold, size: 18),
+                  label: Text(
+                    'RESET CAMERA 📸',
+                    style: GoogleFonts.inter(color: AppColors.haldiGold, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  onPressed: _resetCamera,
                 ),
                 const SizedBox(width: 8),
                 IconButton(
