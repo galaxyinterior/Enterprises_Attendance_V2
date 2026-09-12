@@ -226,11 +226,51 @@ class OfflineDbService {
     );
   }
 
-  // Save/Sync list of employees into local SQLite database
-  Future<void> saveLocalEmployees(List<Map<String, dynamic>> employeeMaps) async {
+  // Remove single employee record from local SQLite database
+  Future<void> deleteLocalEmployee(String employeeId) async {
     final db = await database;
+    await db.delete(
+      'local_employees',
+      where: 'employeeId = ?',
+      whereArgs: [employeeId],
+    );
+  }
+
+  // Save/Sync list of active employees into local SQLite database (purges deleted/inactive employees)
+  Future<void> saveLocalEmployees(List<Map<String, dynamic>> employeeMaps, {String? businessId}) async {
+    final db = await database;
+
+    // Filter active employees only
+    final activeEmps = employeeMaps.where((e) => (e['active'] ?? true) == true).toList();
+
+    // Collect active employee IDs
+    final validIds = activeEmps
+        .map((e) => (e['employeeId'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    final String targetBizId = businessId ?? (employeeMaps.isNotEmpty ? (employeeMaps.first['businessId'] ?? '') : '');
+
+    // Purge deleted/inactive employee records from SQLite for target business
+    if (targetBizId.isNotEmpty) {
+      if (validIds.isNotEmpty) {
+        final placeholders = List.filled(validIds.length, '?').join(',');
+        await db.delete(
+          'local_employees',
+          where: 'businessId = ? AND employeeId NOT IN ($placeholders)',
+          whereArgs: [targetBizId, ...validIds],
+        );
+      } else {
+        await db.delete(
+          'local_employees',
+          where: 'businessId = ?',
+          whereArgs: [targetBizId],
+        );
+      }
+    }
+
     final batch = db.batch();
-    for (var emp in employeeMaps) {
+    for (var emp in activeEmps) {
       final String empId = emp['employeeId'] ?? '';
       if (empId.isEmpty) continue;
       final embedding = emp['faceEmbedding'];
@@ -238,7 +278,7 @@ class OfflineDbService {
         'local_employees',
         {
           'employeeId': empId,
-          'businessId': emp['businessId'] ?? '',
+          'businessId': emp['businessId'] ?? targetBizId,
           'empCode': emp['employeeCode'] ?? emp['empCode'] ?? '',
           'fullName': emp['fullName'] ?? '',
           'phone': emp['phone'] ?? emp['phoneNumber'] ?? '',

@@ -135,10 +135,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           .listen((snapshot) async {
         final enrolled = snapshot.docs
             .map((doc) => doc.data())
-            .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+            .where((emp) => (emp['active'] ?? true) == true && emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
             .toList();
 
-        await _offlineDb.saveLocalEmployees(enrolled);
+        await _offlineDb.saveLocalEmployees(enrolled, businessId: widget.businessId);
         final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
         _logCacheDiagnostics(updatedLocal);
 

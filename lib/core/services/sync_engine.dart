@@ -129,18 +129,17 @@ class SyncEngine {
           .collection(AppConstants.colBusinesses)
           .doc(businessId)
           .collection(AppConstants.colEmployees)
+          .where('active', isEqualTo: true)
           .get()
           .timeout(const Duration(seconds: 5));
 
-      if (empSnap.docs.isNotEmpty) {
-        final empMaps = empSnap.docs
-            .map((doc) => doc.data())
-            .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
-            .toList();
+      final empMaps = empSnap.docs
+          .map((doc) => doc.data())
+          .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+          .toList();
 
-        await _offlineDb.saveLocalEmployees(empMaps);
-        debugPrint('✓ Cached ${empMaps.length} employee face profiles to local SQLite!');
-      }
+      await _offlineDb.saveLocalEmployees(empMaps, businessId: businessId);
+      debugPrint('✓ Cached ${empMaps.length} active employee face profiles to local SQLite!');
 
       // 2. Download shift configurations
       final shiftSnap = await _firestore
