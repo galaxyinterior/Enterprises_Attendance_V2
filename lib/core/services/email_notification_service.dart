@@ -132,5 +132,66 @@ class EmailNotificationService {
       return false;
     }
   }
+
+  Future<bool> sendLateAttendanceAlertEmail({
+    required String employeeName,
+    required String employeeId,
+    required String shiftName,
+    required int lateMinutes,
+    required String lateReason,
+    required String shopId,
+    required DateTime checkInTime,
+    String? adminEmail,
+  }) async {
+    final smtpServer = gmail(_smtpUser, _smtpPassword);
+    final recipient = (adminEmail != null && adminEmail.isNotEmpty && adminEmail.contains('@'))
+        ? adminEmail
+        : _masterEmail;
+
+    final String formattedTime = '${checkInTime.hour.toString().padLeft(2, '0')}:${checkInTime.minute.toString().padLeft(2, '0')}';
+
+    final message = Message()
+      ..from = Address(_smtpUser, 'Smart Attendance Ecosystem')
+      ..recipients.add(recipient)
+      ..subject = '⚠️ LATE ATTENDANCE ALERT: $employeeName ($lateMinutes mins late)'
+      ..html = '''
+        <div style="font-family: Arial, sans-serif; padding: 24px; background-color: #0f172a; color: #ffffff; border-radius: 12px; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #ef4444; margin-top: 0;">⚠️ Late Attendance Check-In Alert</h2>
+          <p style="color: #cbd5e1; font-size: 15px;">An employee has checked in after the shift deadline and submitted a late reason for admin review.</p>
+          
+          <div style="background-color: #1e293b; padding: 16px; border-radius: 10px; border-left: 4px solid #ef4444; margin: 20px 0;">
+            <table style="width: 100%; color: #ffffff; border-spacing: 0 6px;">
+              <tr><td style="color: #94a3b8; width: 140px;">Employee Name:</td><td><strong style="color: #ffffff; font-size: 16px;">$employeeName</strong></td></tr>
+              <tr><td style="color: #94a3b8;">Employee Code:</td><td><strong style="color: #f59e0b;">$employeeId</strong></td></tr>
+              <tr><td style="color: #94a3b8;">Shop ID:</td><td>$shopId</td></tr>
+              <tr><td style="color: #94a3b8;">Shift Name:</td><td>$shiftName</td></tr>
+              <tr><td style="color: #94a3b8;">Check-In Time:</td><td><strong>$formattedTime</strong></td></tr>
+              <tr><td style="color: #94a3b8;">Late Duration:</td><td><strong style="color: #ef4444;">$lateMinutes Minutes Late</strong></td></tr>
+              <tr><td style="color: #94a3b8;">Submitted Reason:</td><td><em style="color: #f59e0b;">"$lateReason"</em></td></tr>
+            </table>
+          </div>
+
+          <div style="background-color: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid #f59e0b;">
+            <p style="margin: 0; color: #f59e0b; font-size: 13px; font-weight: bold;">
+              📌 Current Status: ABSENT (Pending Admin Approval)
+            </p>
+            <p style="margin: 4px 0 0 0; color: #cbd5e1; font-size: 12px;">
+              Please open the Shop Admin Console to Approve or Reject this late attendance reason.
+            </p>
+          </div>
+
+          <p style="color: #64748b; font-size: 12px; margin-top: 24px; text-align: center;">Smart Attendance Ecosystem — Automatic Security Alert</p>
+        </div>
+      ''';
+
+    try {
+      final sendReport = await send(message, smtpServer);
+      debugPrint('Late attendance email sent successfully to $recipient: $sendReport');
+      return true;
+    } catch (e) {
+      debugPrint('Error sending late attendance email: $e');
+      return false;
+    }
+  }
 }
 

@@ -18,6 +18,7 @@ import '../../core/services/kiosk_heartbeat_service.dart';
 import '../../core/services/auth_routing_service.dart';
 import '../../core/services/shift_engine_service.dart';
 import '../../core/services/sync_engine.dart';
+import '../../core/services/email_notification_service.dart';
 import '../../models/attendance_model.dart';
 import '../../models/shift_model.dart';
 import '../auth/login_screen.dart';
@@ -818,6 +819,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                               .set(attendance.toMap())
                               .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
                               .catchError((err) => debugPrint('Cloud sync error: $err'));
+
+                          // 3. Send Automatic Email Alert via Gmail SMTP App Password
+                          EmailNotificationService().sendLateAttendanceAlertEmail(
+                            employeeName: name,
+                            employeeId: empId,
+                            shiftName: shiftResult.shiftName,
+                            lateMinutes: shiftResult.lateMinutes,
+                            lateReason: fullReason,
+                            shopId: widget.shopId,
+                            checkInTime: now,
+                          );
 
                           if (mounted) Navigator.pop(ctx);
                         },

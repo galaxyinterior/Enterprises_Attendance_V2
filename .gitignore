@@ -20,7 +20,8 @@ run_app.bat
 pplan.md
 run_rpc.js
 migrate_store_code.js
-
+*.env
+*.env.example
 # IntelliJ related
 *.iml
 *.ipr

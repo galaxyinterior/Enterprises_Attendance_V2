@@ -24,7 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
 
   // Selected Login Role Mode
-  int _selectedRoleTab = 0; // 0 = Shop Admin, 1 = Kiosk Device, 2 = Master Panel
+  int _selectedRoleTab = 0; // 0 = Shop Admin, 1 = Kiosk Device
 
   void _handleRoleTabChange(int index) {
     setState(() {
@@ -33,8 +33,6 @@ class _LoginScreenState extends State<LoginScreen> {
         _emailController.text = 'ABC001@admin.in';
       } else if (index == 1) {
         _emailController.text = 'ABC001@kiosk.in';
-      } else if (index == 2) {
-        _emailController.text = 'master@admin.com';
       }
     });
   }
@@ -186,7 +184,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             _buildRoleTab('Shop Admin', 0),
                             _buildRoleTab('Kiosk Device', 1),
-                            _buildRoleTab('Master', 2),
                           ],
                         ),
                       ),
