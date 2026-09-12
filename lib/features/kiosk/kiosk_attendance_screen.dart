@@ -649,7 +649,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
             );
           } else {
             final attendance = AttendanceModel(
-              attendanceId: const Uuid().v4(),
+              attendanceId: ShiftEngineService().generateDeterministicAttendanceId(
+                businessId: widget.businessId,
+                employeeId: empId,
+                date: dateStr,
+              ),
               businessId: widget.businessId,
               employeeId: empId,
               employeeName: name,
@@ -855,7 +859,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                               : selectedReason;
 
                           final attendance = AttendanceModel(
-                            attendanceId: const Uuid().v4(),
+                            attendanceId: ShiftEngineService().generateDeterministicAttendanceId(
+                              businessId: widget.businessId,
+                              employeeId: empId,
+                              date: dateStr,
+                            ),
                             businessId: widget.businessId,
                             employeeId: empId,
                             employeeName: name,
