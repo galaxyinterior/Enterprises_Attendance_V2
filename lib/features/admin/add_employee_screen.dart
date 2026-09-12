@@ -101,6 +101,104 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     super.dispose();
   }
 
+  int _multiAngleStep = 0;
+  final List<List<double>> _multiAngleCapturedVectors = [];
+
+  // 3-Step Guided Multi-Angle Capture Flow for maximum kiosk recognition accuracy
+  Future<void> _captureMultiAngleStepFace() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      setState(() {
+        _faceStatusMessage = '❌ Camera not ready. Please check camera permission.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isCapturingFace = true;
+    });
+
+    try {
+      final xFile = await _cameraController!.takePicture();
+      final bytes = await xFile.readAsBytes();
+
+      String contextName = 'ENROLLMENT_STEP_${_multiAngleStep + 1}';
+      final res = await _faceService.processFaceFromBytesDetailed(
+        bytes: bytes,
+        tempFilePath: xFile.path,
+        context: contextName,
+        employeeId: _empCodeCtrl.text.trim(),
+      );
+
+      if (res['success'] == true && res['embedding'] != null) {
+        final List<double> vec = res['embedding'] as List<double>;
+
+        // Duplicate check on first pose step
+        if (_multiAngleCapturedVectors.isEmpty) {
+          final existingStaff = await OfflineDbService().getLocalEmployees();
+          final dupCheck = await _faceService.checkDuplicateEnrolledFace(
+            newEmbedding: vec,
+            existingEmployees: existingStaff,
+          );
+
+          if (dupCheck != null && dupCheck['isDuplicate'] == true) {
+            final String matchedName = dupCheck['matchedEmployeeName'] ?? 'Existing Staff';
+            setState(() {
+              _capturedFaceBytes = null;
+              _enrolledFaceEmbedding = null;
+              _multiAngleStep = 0;
+              _multiAngleCapturedVectors.clear();
+              _faceStatusMessage = '❌ Duplicate Face Detected! Already registered for "$matchedName".';
+            });
+            return;
+          }
+        }
+
+        _multiAngleCapturedVectors.add(vec);
+        final int nextStep = _multiAngleCapturedVectors.length + 1;
+
+        if (nextStep <= 3) {
+          String nextHint = nextStep == 2
+              ? 'Step 2/3: Turn head slightly LEFT 👈 & tap Capture'
+              : 'Step 3/3: Turn head slightly RIGHT 👉 & tap Capture';
+
+          setState(() {
+            _capturedFaceBytes = bytes;
+            _multiAngleStep = nextStep - 1;
+            _faceStatusMessage = '✓ Pose ${nextStep - 1}/3 Captured! $nextHint';
+          });
+        } else {
+          // Synthesize multi-pose 3-angle embedding
+          final synthesized = _faceService.synthesizeMultiAngleEmbedding(_multiAngleCapturedVectors);
+          if (synthesized != null) {
+            setState(() {
+              _capturedFaceBytes = bytes;
+              _enrolledFaceEmbedding = synthesized;
+              _multiAngleStep = 3;
+              _faceStatusMessage = '✓ High-Accuracy 3-Angle Face Profile Enrolled (${synthesized.length}D Synthesized)';
+            });
+          } else {
+            setState(() {
+              _faceStatusMessage = '❌ Synthesis error. Please retry 3-step capture.';
+            });
+          }
+        }
+      } else {
+        final String err = res['error'] ?? 'Face not detected clearly';
+        setState(() {
+          _faceStatusMessage = '❌ $err';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _faceStatusMessage = '❌ Capture error: $e';
+      });
+    } finally {
+      setState(() {
+        _isCapturingFace = false;
+      });
+    }
+  }
+
   // Single-Step Straight Face Enrolment
   Future<void> _captureAndEnrollFace() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
@@ -171,6 +269,8 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
     setState(() {
       _enrolledFaceEmbedding = null;
       _capturedFaceBytes = null;
+      _multiAngleStep = 0;
+      _multiAngleCapturedVectors.clear();
       _faceStatusMessage = 'Look straight at camera & tap Capture 😐';
     });
   }
@@ -639,28 +739,56 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
           ),
           const SizedBox(height: 14),
 
-          // Action Button
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isEnrolled ? AppColors.haldiGold : AppColors.pannaEmerald,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          // Action Buttons: 3-Pose Multi-Angle Synthesis OR Quick Single Capture
+          Column(
+            children: [
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isEnrolled ? AppColors.haldiGold : AppColors.pannaEmerald,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 2,
+                  ),
+                  icon: _isCapturingFace
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Icon(isEnrolled ? Icons.refresh_rounded : Icons.view_in_ar_rounded, color: Colors.white, size: 20),
+                  label: Text(
+                    _isCapturingFace
+                        ? 'EXTRACTING VECTOR...'
+                        : (isEnrolled
+                            ? 'RE-ENROLL 3-ANGLE FACE PROFILE'
+                            : (_multiAngleStep > 0
+                                ? 'CAPTURE POSE ${_multiAngleStep + 1}/3 📸'
+                                : 'START 3-ANGLE GUIDED CAPTURE (RECOMMENDED 🌟)')),
+                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
+                  ),
+                  onPressed: _isCapturingFace
+                      ? null
+                      : (isEnrolled ? _resetFaceEnrollment : _captureMultiAngleStepFace),
+                ),
               ),
-              icon: _isCapturingFace
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : Icon(isEnrolled ? Icons.refresh_rounded : Icons.camera_alt_rounded, color: Colors.white, size: 20),
-              label: Text(
-                _isCapturingFace
-                    ? 'EXTRACTING VECTOR...'
-                    : (isEnrolled ? 'RE-CAPTURE STRAIGHT FACE' : 'CAPTURE STRAIGHT FACE'),
-                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-              ),
-              onPressed: _isCapturingFace
-                  ? null
-                  : (isEnrolled ? _resetFaceEnrollment : _captureAndEnrollFace),
-            ),
+              if (!isEnrolled) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.cardBorderDark),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.camera_alt_outlined, color: AppColors.textSecondary, size: 18),
+                    label: Text(
+                      'QUICK 1-POSE CAPTURE (STRAIGHT 😐)',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 11, color: AppColors.textSecondary),
+                    ),
+                    onPressed: _isCapturingFace ? null : _captureAndEnrollFace,
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),

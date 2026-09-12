@@ -64,16 +64,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   Map<String, dynamic>? _activeAnnouncementData;
   final Set<String> _spokenAnnouncementIds = {};
 
-  // Eye Blink Anti-Spoofing & Liveness State
+  // Eye Blink & Natural Micro Movement Anti-Spoofing & Liveness State
   bool _blinkVerified = false;
+  bool _movementVerified = false;
+  double? _initialHeadYaw;
+  double? _initialHeadPitch;
   DateTime? _faceTrackStartTime;
   bool _hasSpokenBlinkPrompt = false;
   bool _isPhotoSpoofDetected = false;
 
-  /// DEVELOPMENT ONLY: Debug/test switch to toggle liveness requirement during dev testing
-  /// When false: Face detection -> embedding -> matching
-  /// When true: Face detection -> blink -> embedding -> matching
-  bool requireLivenessForRecognition = false;
+  /// Production Switch: Enforce active eye blink & head micro-movement anti-spoofing
+  bool requireLivenessForRecognition = true;
 
   @override
   void initState() {
@@ -233,6 +234,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             setState(() {
               _faceDetectedInFrame = false;
               _blinkVerified = false;
+              _movementVerified = false;
+              _initialHeadYaw = null;
+              _initialHeadPitch = null;
               _faceTrackStartTime = null;
               _hasSpokenBlinkPrompt = false;
               _isPhotoSpoofDetected = false;
@@ -254,7 +258,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         return;
       }
 
-      // If requireLivenessForRecognition is enabled (true): enforce blink verification
+      // Enforce Dual Liveness Verification (Eye Blink + Natural Head Micro-Movement)
       if (requireLivenessForRecognition) {
         // Face is detected & orientation is valid!
         _faceTrackStartTime ??= DateTime.now();
@@ -264,47 +268,76 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         final double leftEyeOpen = (res['leftEyeOpen'] as double? ?? 1.0);
         final double rightEyeOpen = (res['rightEyeOpen'] as double? ?? 1.0);
 
-        // Check Eye Blink Transition (either eye closes below 0.35)
+        final double currentYaw = (res['headEulerY'] as double? ?? 0.0);
+        final double currentPitch = (res['headEulerX'] as double? ?? 0.0);
+
+        _initialHeadYaw ??= currentYaw;
+        _initialHeadPitch ??= currentPitch;
+
+        // 1. Check Eye Blink Transition (either eye closes below 0.35 or ML Kit blink flag)
         if (isBlinkingNow || leftEyeOpen < 0.35 || rightEyeOpen < 0.35) {
           _blinkVerified = true;
           _isPhotoSpoofDetected = false;
           debugPrint('✨ EYE BLINK VERIFIED FOR LIVE USER! (Left: $leftEyeOpen, Right: $rightEyeOpen)');
         }
 
-        if (!_blinkVerified) {
-          // Speak voice blink prompt once per face encounter
+        // 2. Check Natural Micro Head Movement (rotation shift >= 3.5 degrees)
+        final double deltaYaw = (currentYaw - _initialHeadYaw!).abs();
+        final double deltaPitch = (currentPitch - _initialHeadPitch!).abs();
+        if (deltaYaw >= 3.5 || deltaPitch >= 3.5) {
+          _movementVerified = true;
+          _isPhotoSpoofDetected = false;
+          debugPrint('✨ HEAD MOVEMENT VERIFIED FOR LIVE USER! (dYaw: ${deltaYaw.toStringAsFixed(1)}°, dPitch: ${deltaPitch.toStringAsFixed(1)}°)');
+        }
+
+        final bool isLivenessPassed = _blinkVerified && _movementVerified;
+
+        if (!isLivenessPassed) {
+          // Speak voice prompt once per face encounter
           if (!_hasSpokenBlinkPrompt) {
             _hasSpokenBlinkPrompt = true;
-            _voiceService.speakBlinkPrompt();
+            _voiceService.speakLivenessPrompt();
           }
 
-          // Anti-Spoof: If face has been still for > 3.0 seconds without any eye blinks
+          // Anti-Spoof Rejection: Still image/video without both blink & movement for > 3.0 seconds
           if (elapsedMs > 3000) {
             if (!_isPhotoSpoofDetected) {
               _isPhotoSpoofDetected = true;
-              _voiceService.speakAlert('Photo detected. Attendance rejected. Please blink your eyes.');
+              _voiceService.speakAlert('Photo or video screen detected. Attendance rejected. Please blink eyes and turn head naturally.');
             }
             if (mounted) {
               setState(() {
                 _faceDetectedInFrame = true;
-                _statusMessage = '🚫 PHOTO SPOOF DETECTED! Please BLINK your eyes to verify.';
+                _statusMessage = '🚫 PHOTO / VIDEO SPOOF DETECTED! Active blink & head movement required.';
               });
             }
             return;
           }
 
-          // Waiting for blink
+          // Waiting for user to complete blink and natural head movement
           if (mounted) {
+            String missingAction = '';
+            if (!_blinkVerified && !_movementVerified) {
+              missingAction = 'Blink Eyes & Turn Head Slightly';
+            } else if (!_blinkVerified) {
+              missingAction = 'Blink Your Eyes';
+            } else {
+              missingAction = 'Turn Head Slightly';
+            }
+
             setState(() {
               _faceDetectedInFrame = true;
-              _statusMessage = '👀 Face Detected — BLINK YOUR EYES to verify attendance!';
+              _statusMessage = '👀 Face Detected — $missingAction to verify! (Aankhein jhapkayen aur sar hilaayein)';
             });
           }
           return;
         }
 
-        // Blink Verified! Reset liveness flags for next scan
+        // Dual Liveness Verified! Reset tracking for next scan
         _blinkVerified = false;
+        _movementVerified = false;
+        _initialHeadYaw = null;
+        _initialHeadPitch = null;
         _faceTrackStartTime = null;
         _hasSpokenBlinkPrompt = false;
         _isPhotoSpoofDetected = false;
@@ -313,7 +346,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       if (mounted) {
         setState(() {
           _statusMessage = requireLivenessForRecognition
-              ? '✨ Liveness Verified! Processing Biometric Attendance...'
+              ? '✨ Active Liveness Verified! Processing Biometric Attendance...'
               : '✨ Face Detected! Processing Biometric Attendance...';
         });
       }
