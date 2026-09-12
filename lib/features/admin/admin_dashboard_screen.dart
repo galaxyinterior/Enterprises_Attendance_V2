@@ -11,6 +11,7 @@ import 'add_employee_screen.dart';
 import 'edit_employee_screen.dart';
 import 'shift_management_screen.dart';
 import 'admin_calendar_screen.dart';
+import '../../core/services/custom_voice_recorder_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   final String shopId;
@@ -31,8 +32,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
   final TextEditingController _announcementCtrl = TextEditingController();
+  final CustomVoiceRecorderService _voiceRecorder = CustomVoiceRecorderService();
   String _selectedAnnouncementType = 'emergency'; // 'emergency', 'notice', 'info'
   bool _isBroadcastingAnnouncement = false;
+  bool _isCustomAudioMode = false;
+  String? _recordedAudioBase64;
+  String? _recordedAudioPath;
+  int _recordedDuration = 0;
   DateTime _selectedLogDate = DateTime.now();
   String _selectedStatusFilter = 'ALL';
 
@@ -40,15 +46,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void dispose() {
     _searchCtrl.dispose();
     _announcementCtrl.dispose();
+    _voiceRecorder.dispose();
     super.dispose();
   }
 
   Future<void> _broadcastAnnouncement() async {
     final message = _announcementCtrl.text.trim();
-    if (message.isEmpty) {
+
+    if (!_isCustomAudioMode && message.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter an announcement message.'),
+          backgroundColor: AppColors.sindoorRed,
+        ),
+      );
+      return;
+    }
+
+    if (_isCustomAudioMode && (_recordedAudioBase64 == null || _recordedAudioBase64!.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please record a custom voice audio message first.'),
           backgroundColor: AppColors.sindoorRed,
         ),
       );
@@ -66,21 +84,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           .collection(AppConstants.colAnnouncements)
           .doc();
 
+      final String announcementText = _isCustomAudioMode
+          ? '🎙️ Custom Voice Recording Broadcast (${_recordedDuration}s)'
+          : message;
+
       await docRef.set({
         'id': docRef.id,
-        'message': message,
+        'message': announcementText,
         'type': _selectedAnnouncementType,
         'createdAt': FieldValue.serverTimestamp(),
         'active': true,
         'shopId': widget.shopId,
+        'isCustomAudio': _isCustomAudioMode,
+        'audioData': _isCustomAudioMode ? _recordedAudioBase64 : null,
       });
 
       _announcementCtrl.clear();
+      setState(() {
+        _recordedAudioBase64 = null;
+        _recordedAudioPath = null;
+        _recordedDuration = 0;
+      });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('🎉 Announcement broadcasted live to Kiosk devices!'),
+            content: Text('🎉 Custom Voice Announcement broadcasted live to Kiosk devices!'),
             backgroundColor: AppColors.pannaEmerald,
           ),
         );
@@ -1023,33 +1052,244 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  '2. Announcement Message:',
+                  '2. Choose Broadcast Format:',
                   style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _announcementCtrl,
-                  maxLines: 3,
-                  style: const TextStyle(color: AppColors.textPrimary),
-                  decoration: InputDecoration(
-                    hintText: 'Enter message to speak on Kiosk speaker & display on screen...',
-                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                    filled: true,
-                    fillColor: AppColors.inputBgDark,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.cardBorderDark),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          if (_voiceRecorder.isRecording) _voiceRecorder.cancelRecording();
+                          setState(() => _isCustomAudioMode = false);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: !_isCustomAudioMode ? AppColors.kesariSaffron.withValues(alpha: 0.2) : AppColors.inputBgDark,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: !_isCustomAudioMode ? AppColors.kesariSaffron : AppColors.cardBorderDark,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.notes_rounded, color: !_isCustomAudioMode ? AppColors.kesariSaffron : AppColors.textMuted, size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                '📝 Text Message (TTS)',
+                                style: GoogleFonts.inter(
+                                  color: !_isCustomAudioMode ? Colors.white : AppColors.textMuted,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.cardBorderDark),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() => _isCustomAudioMode = true);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: _isCustomAudioMode ? AppColors.sindoorRed.withValues(alpha: 0.2) : AppColors.inputBgDark,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _isCustomAudioMode ? AppColors.sindoorRed : AppColors.cardBorderDark,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.mic_rounded, color: _isCustomAudioMode ? AppColors.sindoorRed : AppColors.textMuted, size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                '🎙️ Custom Voice Record',
+                                style: GoogleFonts.inter(
+                                  color: _isCustomAudioMode ? Colors.white : AppColors.textMuted,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.kesariSaffron),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Format 1: Text Message Input
+                if (!_isCustomAudioMode) ...[
+                  Text(
+                    '3. Enter Text Announcement Message:',
+                    style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _announcementCtrl,
+                    maxLines: 3,
+                    style: const TextStyle(color: AppColors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Enter message to speak on Kiosk speaker & display on screen...',
+                      hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      filled: true,
+                      fillColor: AppColors.inputBgDark,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.cardBorderDark),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.cardBorderDark),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.kesariSaffron),
+                      ),
                     ),
                   ),
-                ),
+                ] else ...[
+                  // Format 2: Custom Voice Audio Recorder UI
+                  Text(
+                    '3. Record Custom Voice Audio Message:',
+                    style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.inputBgDark,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.cardBorderDark),
+                    ),
+                    child: Column(
+                      children: [
+                        if (!_voiceRecorder.isRecording && _recordedAudioBase64 == null) ...[
+                          IconButton(
+                            iconSize: 56,
+                            icon: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: const BoxDecoration(
+                                color: AppColors.sindoorRed,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.mic, color: Colors.white, size: 36),
+                            ),
+                            onPressed: () async {
+                              final started = await _voiceRecorder.startRecording();
+                              if (started) {
+                                setState(() {});
+                              } else {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Microphone permission denied or recording failed.')),
+                                  );
+                                }
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Tap Mic to Start Custom Voice Recording',
+                            style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13, fontWeight: FontWeight.w500),
+                          ),
+                        ] else if (_voiceRecorder.isRecording) ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 12,
+                                height: 12,
+                                decoration: const BoxDecoration(
+                                  color: AppColors.sindoorRed,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'RECORDING... (00:${_voiceRecorder.recordingDurationSeconds.toString().padLeft(2, '0')}s)',
+                                style: GoogleFonts.outfit(color: AppColors.sindoorRed, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
+                            icon: const Icon(Icons.stop_rounded, color: Colors.white),
+                            label: const Text('STOP RECORDING', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            onPressed: () async {
+                              final res = await _voiceRecorder.stopRecording();
+                              if (res != null) {
+                                setState(() {
+                                  _recordedAudioPath = res['filePath'] as String?;
+                                  _recordedAudioBase64 = res['base64Audio'] as String?;
+                                  _recordedDuration = res['durationSeconds'] as int? ?? 0;
+                                });
+                              }
+                            },
+                          ),
+                        ] else if (_recordedAudioBase64 != null) ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.check_circle_rounded, color: AppColors.pannaEmerald, size: 24),
+                              const SizedBox(width: 8),
+                              Text(
+                                '✓ Voice Audio Recorded (${_recordedDuration}s)',
+                                style: GoogleFonts.outfit(color: AppColors.pannaEmerald, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(backgroundColor: AppColors.mayurBlue),
+                                icon: Icon(_voiceRecorder.isPlayingPreview ? Icons.stop_rounded : Icons.play_arrow_rounded, color: Colors.white),
+                                label: Text(_voiceRecorder.isPlayingPreview ? 'STOP PREVIEW' : 'PLAY PREVIEW', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                onPressed: () {
+                                  if (_voiceRecorder.isPlayingPreview) {
+                                    _voiceRecorder.stopPreview().then((_) => setState(() {}));
+                                  } else {
+                                    _voiceRecorder.playPreview(_recordedAudioPath ?? _recordedAudioBase64!).then((_) => setState(() {}));
+                                  }
+                                },
+                              ),
+                              const SizedBox(width: 12),
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.sindoorRed)),
+                                icon: const Icon(Icons.refresh_rounded, color: AppColors.sindoorRed),
+                                label: const Text('RE-RECORD', style: TextStyle(color: AppColors.sindoorRed, fontWeight: FontWeight.bold)),
+                                onPressed: () {
+                                  _voiceRecorder.stopPreview();
+                                  setState(() {
+                                    _recordedAudioBase64 = null;
+                                    _recordedAudioPath = null;
+                                    _recordedDuration = 0;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,

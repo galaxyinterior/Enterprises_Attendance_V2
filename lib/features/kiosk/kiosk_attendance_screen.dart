@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
 import 'package:camera/camera.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/face_recognition_service.dart';
@@ -301,6 +305,24 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     });
   }
 
+  final AudioPlayer _customAudioPlayer = AudioPlayer();
+
+  Future<void> _playCustomAudio(String base64Audio) async {
+    try {
+      await _customAudioPlayer.stop();
+      final bytes = base64Decode(base64Audio);
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/kiosk_announcement_voice.m4a');
+      await file.writeAsBytes(bytes);
+
+      await _customAudioPlayer.setVolume(1.0);
+      await _customAudioPlayer.play(DeviceFileSource(file.path));
+      debugPrint('🎙️ Playing custom voice announcement audio on Kiosk!');
+    } catch (e) {
+      debugPrint('Error playing custom voice audio on kiosk: $e');
+    }
+  }
+
   void _listenToAnnouncements() {
     _announcementsSub = FirebaseFirestore.instance
         .collection(AppConstants.colBusinesses)
@@ -324,6 +346,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         final docId = activeDoc.id;
         final message = data['message'] as String? ?? '';
         final type = data['type'] as String? ?? 'general';
+        final isCustomAudio = data['isCustomAudio'] as bool? ?? false;
+        final audioData = data['audioData'] as String?;
 
         if (mounted) {
           setState(() {
@@ -331,9 +355,13 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           });
         }
 
-        if (!_spokenAnnouncementIds.contains(docId) && message.isNotEmpty) {
+        if (!_spokenAnnouncementIds.contains(docId)) {
           _spokenAnnouncementIds.add(docId);
-          _voiceService.speakAnnouncement(message, type);
+          if (isCustomAudio && audioData != null && audioData.isNotEmpty) {
+            _playCustomAudio(audioData);
+          } else if (message.isNotEmpty) {
+            _voiceService.speakAnnouncement(message, type);
+          }
         }
       } else {
         if (mounted && _activeAnnouncementData != null) {
@@ -352,6 +380,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     SyncEngine().stopAutoSync();
     _heartbeatService.stopHeartbeat();
     _cameraController?.dispose();
+    _customAudioPlayer.dispose();
     super.dispose();
   }
 
@@ -359,6 +388,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     if (_activeAnnouncementData == null) return const SizedBox.shrink();
     final message = _activeAnnouncementData!['message'] as String? ?? '';
     final type = _activeAnnouncementData!['type'] as String? ?? 'general';
+    final isCustomAudio = _activeAnnouncementData!['isCustomAudio'] as bool? ?? false;
+    final audioData = _activeAnnouncementData!['audioData'] as String?;
     final isEmergency = type == 'emergency';
     final isNotice = type == 'notice';
 
@@ -390,7 +421,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
               shape: BoxShape.circle,
             ),
             child: Icon(
-              isEmergency ? Icons.warning_amber_rounded : Icons.campaign_rounded,
+              isCustomAudio ? Icons.mic_rounded : (isEmergency ? Icons.warning_amber_rounded : Icons.campaign_rounded),
               color: Colors.white,
               size: 28,
             ),
@@ -429,9 +460,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
           const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.volume_up_rounded, color: Colors.white, size: 28),
-            tooltip: 'Re-Play Announcement Voice TTS',
+            tooltip: 'Re-Play Voice Announcement',
             onPressed: () {
-              if (message.isNotEmpty) {
+              if (isCustomAudio && audioData != null && audioData.isNotEmpty) {
+                _playCustomAudio(audioData);
+              } else if (message.isNotEmpty) {
                 _voiceService.speakAnnouncement(message, type);
               }
             },
