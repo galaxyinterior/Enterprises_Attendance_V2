@@ -70,6 +70,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   bool _hasSpokenBlinkPrompt = false;
   bool _isPhotoSpoofDetected = false;
 
+  /// DEVELOPMENT ONLY: Debug/test switch to toggle liveness requirement during dev testing
+  /// When false: Face detection -> embedding -> matching
+  /// When true: Face detection -> blink -> embedding -> matching
+  bool requireLivenessForRecognition = false;
+
   @override
   void initState() {
     super.initState();
@@ -218,66 +223,71 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         return;
       }
 
-      // Face is detected & orientation is valid!
-      _faceTrackStartTime ??= DateTime.now();
-      final elapsedMs = DateTime.now().difference(_faceTrackStartTime!).inMilliseconds;
+      // If requireLivenessForRecognition is enabled (true): enforce blink verification
+      if (requireLivenessForRecognition) {
+        // Face is detected & orientation is valid!
+        _faceTrackStartTime ??= DateTime.now();
+        final elapsedMs = DateTime.now().difference(_faceTrackStartTime!).inMilliseconds;
 
-      final bool isBlinkingNow = res['isBlinking'] as bool? ?? false;
-      final double leftEyeOpen = (res['leftEyeOpen'] as double? ?? 1.0);
-      final double rightEyeOpen = (res['rightEyeOpen'] as double? ?? 1.0);
+        final bool isBlinkingNow = res['isBlinking'] as bool? ?? false;
+        final double leftEyeOpen = (res['leftEyeOpen'] as double? ?? 1.0);
+        final double rightEyeOpen = (res['rightEyeOpen'] as double? ?? 1.0);
 
-      // Check Eye Blink Transition (either eye closes below 0.35)
-      if (isBlinkingNow || leftEyeOpen < 0.35 || rightEyeOpen < 0.35) {
-        _blinkVerified = true;
-        _isPhotoSpoofDetected = false;
-        debugPrint('✨ EYE BLINK VERIFIED FOR LIVE USER! (Left: $leftEyeOpen, Right: $rightEyeOpen)');
-      }
-
-      if (!_blinkVerified) {
-        // Speak voice blink prompt once per face encounter
-        if (!_hasSpokenBlinkPrompt) {
-          _hasSpokenBlinkPrompt = true;
-          _voiceService.speakBlinkPrompt();
+        // Check Eye Blink Transition (either eye closes below 0.35)
+        if (isBlinkingNow || leftEyeOpen < 0.35 || rightEyeOpen < 0.35) {
+          _blinkVerified = true;
+          _isPhotoSpoofDetected = false;
+          debugPrint('✨ EYE BLINK VERIFIED FOR LIVE USER! (Left: $leftEyeOpen, Right: $rightEyeOpen)');
         }
 
-        // Anti-Spoof: If face has been still for > 3.0 seconds without any eye blinks
-        if (elapsedMs > 3000) {
-          if (!_isPhotoSpoofDetected) {
-            _isPhotoSpoofDetected = true;
-            _voiceService.speakAlert('Photo detected. Attendance rejected. Please blink your eyes.');
+        if (!_blinkVerified) {
+          // Speak voice blink prompt once per face encounter
+          if (!_hasSpokenBlinkPrompt) {
+            _hasSpokenBlinkPrompt = true;
+            _voiceService.speakBlinkPrompt();
           }
+
+          // Anti-Spoof: If face has been still for > 3.0 seconds without any eye blinks
+          if (elapsedMs > 3000) {
+            if (!_isPhotoSpoofDetected) {
+              _isPhotoSpoofDetected = true;
+              _voiceService.speakAlert('Photo detected. Attendance rejected. Please blink your eyes.');
+            }
+            if (mounted) {
+              setState(() {
+                _faceDetectedInFrame = true;
+                _statusMessage = '🚫 PHOTO SPOOF DETECTED! Please BLINK your eyes to verify.';
+              });
+            }
+            return;
+          }
+
+          // Waiting for blink
           if (mounted) {
             setState(() {
               _faceDetectedInFrame = true;
-              _statusMessage = '🚫 PHOTO SPOOF DETECTED! Please BLINK your eyes to verify.';
+              _statusMessage = '👀 Face Detected — BLINK YOUR EYES to verify attendance!';
             });
           }
           return;
         }
 
-        // Waiting for blink
-        if (mounted) {
-          setState(() {
-            _faceDetectedInFrame = true;
-            _statusMessage = '👀 Face Detected — BLINK YOUR EYES to verify attendance!';
-          });
-        }
-        return;
+        // Blink Verified! Reset liveness flags for next scan
+        _blinkVerified = false;
+        _faceTrackStartTime = null;
+        _hasSpokenBlinkPrompt = false;
+        _isPhotoSpoofDetected = false;
       }
-
-      // Blink Verified! Reset liveness flags for next scan
-      _blinkVerified = false;
-      _faceTrackStartTime = null;
-      _hasSpokenBlinkPrompt = false;
-      _isPhotoSpoofDetected = false;
 
       if (mounted) {
         setState(() {
-          _statusMessage = '✨ Liveness Verified! Processing Biometric Attendance...';
+          _statusMessage = requireLivenessForRecognition
+              ? '✨ Liveness Verified! Processing Biometric Attendance...'
+              : '✨ Face Detected! Processing Biometric Attendance...';
         });
       }
 
-      // Trigger attendance scan
+      // Trigger attendance scan (Embedding -> Matching)
       await _processFaceScanWithFile(xFile.path, bytes);
     } catch (e) {
       debugPrint('Auto check frame error: $e');
