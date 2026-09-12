@@ -81,7 +81,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     _listenToShopStatus();
     _listenToEnrolledStaff();
     _listenToAnnouncements();
-    SyncEngine().startAutoSync();
+    SyncEngine().startAutoSync(activeBusinessId: widget.businessId);
     _heartbeatService.startHeartbeat(
       businessId: widget.businessId,
       shopId: widget.shopId,

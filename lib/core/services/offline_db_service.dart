@@ -149,13 +149,13 @@ class OfflineDbService {
     }
   }
 
-  // Get all pending unsynced attendance records
+  // Get all pending unsynced attendance records (including RETRY & FAILED)
   Future<List<AttendanceModel>> getPendingAttendance() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'offline_attendance',
-      where: 'syncStatus = ?',
-      whereArgs: ['PENDING'],
+      where: 'syncStatus IN (?, ?, ?)',
+      whereArgs: ['PENDING', 'RETRY', 'FAILED'],
     );
     return maps.map((map) => AttendanceModel.fromMap(map)).toList();
   }
@@ -165,7 +165,34 @@ class OfflineDbService {
     final db = await database;
     await db.update(
       'offline_attendance',
-      {'syncStatus': 'COMPLETED'},
+      {
+        'syncStatus': 'SYNCED',
+        'serverAck': 1,
+        'lastError': null,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
+      where: 'attendanceId = ?',
+      whereArgs: [attendanceId],
+    );
+  }
+
+  // Record a sync attempt failure or retry state
+  Future<void> recordSyncAttempt({
+    required String attendanceId,
+    required String status, // SYNCING / RETRY / FAILED
+    required int retryCount,
+    String? errorMsg,
+  }) async {
+    final db = await database;
+    await db.update(
+      'offline_attendance',
+      {
+        'syncStatus': status,
+        'retryCount': retryCount,
+        'lastError': errorMsg,
+        'lastAttempt': DateTime.now().toIso8601String(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
       where: 'attendanceId = ?',
       whereArgs: [attendanceId],
     );
