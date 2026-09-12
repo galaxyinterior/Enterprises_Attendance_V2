@@ -831,7 +831,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                         double totalGrossSalary = 0;
                         double totalAdvancesGiven = 0;
-                        double totalNetPayable = 0;
 
                         final Map<String, int> empPresentDays = {};
                         final Map<String, double> empHolidayBonus = {};
