@@ -237,6 +237,45 @@ class SyncEngine {
     return syncedCount;
   }
 
+  /// Manual 2-way Instant Sync: Uploads pending local records & Downloads latest cloud records
+  Future<Map<String, dynamic>> triggerFullBidirectionalSync(String businessId) async {
+    int uploadedCount = 0;
+    int downloadedEmployees = 0;
+    int downloadedShifts = 0;
+    bool isSuccess = false;
+    String message = '';
+
+    try {
+      debugPrint('🔄 Manual Full 2-Way Sync Initiated for Business $businessId...');
+
+      // 1. SYNC UP (Upload pending offline attendance records)
+      uploadedCount = await syncPendingAttendance();
+
+      // 2. SYNC DOWN (Download active employees, face embeddings, and shift rules)
+      if (businessId.isNotEmpty) {
+        await syncDownTenantData(businessId);
+        final localEmps = await _offlineDb.getLocalEmployeesWithEmbeddings(businessId);
+        downloadedEmployees = localEmps.length;
+        final localShifts = await _offlineDb.getLocalShifts(businessId);
+        downloadedShifts = localShifts.length;
+      }
+
+      isSuccess = true;
+      message = '✓ Cloud Sync Complete! Uploaded $uploadedCount attendance records. Updated $downloadedEmployees staff profiles.';
+    } catch (e) {
+      debugPrint('Error during manual 2-way sync: $e');
+      message = '⚠️ Sync Notice: Operating via local SQLite cache.';
+    }
+
+    return {
+      'success': isSuccess,
+      'uploadedCount': uploadedCount,
+      'downloadedEmployees': downloadedEmployees,
+      'downloadedShifts': downloadedShifts,
+      'message': message,
+    };
+  }
+
   void stopAutoSync() {
     _connectivitySubscription?.cancel();
     _periodicSyncTimer?.cancel();

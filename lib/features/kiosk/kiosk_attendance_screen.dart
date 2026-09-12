@@ -1010,6 +1010,61 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     });
   }
 
+  bool _isManualSyncing = false;
+
+  Future<void> _triggerManualSync() async {
+    if (_isManualSyncing) return;
+
+    setState(() {
+      _isManualSyncing = true;
+      _statusMessage = '🔄 Syncing with Cloud... (Uploading local attendance & downloading staff)';
+    });
+
+    try {
+      final result = await SyncEngine().triggerFullBidirectionalSync(widget.businessId);
+
+      // Refresh local enrolled staff cache in memory
+      final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+      if (mounted) {
+        setState(() {
+          _enrolledStaffCache = updatedLocal;
+          _statusMessage = result['message'] ?? '✓ Cloud Sync Complete!';
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.cloud_sync_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    result['message'] ?? '✓ Cloud Sync Complete!',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: AppColors.pannaEmerald,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _statusMessage = '⚠️ Sync error. Operating via local SQLite cache.';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isManualSyncing = false;
+        });
+      }
+    }
+  }
+
   void _showExitDialog() {
     final pinCtrl = TextEditingController();
     String? errorMsg;
@@ -1387,14 +1442,40 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             ),
           ),
 
-          // Top Right Exit Lock Button
+          // Top Right Manual Sync NOW & Exit Lock Action Bar
           Positioned(
             top: 40,
             right: 20,
-            child: IconButton(
-              icon: const Icon(Icons.lock_open_rounded, color: Colors.white70, size: 28),
-              tooltip: 'Exit Kiosk Mode',
-              onPressed: _showExitDialog,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.cardDark,
+                    side: const BorderSide(color: AppColors.kesariSaffron, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  ),
+                  icon: _isManualSyncing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(color: AppColors.kesariSaffron, strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync_rounded, color: AppColors.kesariSaffron, size: 20),
+                  label: Text(
+                    _isManualSyncing ? 'SYNCING...' : 'SYNC NOW 🔄',
+                    style: GoogleFonts.inter(color: AppColors.kesariSaffron, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  onPressed: _isManualSyncing ? null : _triggerManualSync,
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.lock_open_rounded, color: Colors.white70, size: 26),
+                  tooltip: 'Exit Kiosk Mode',
+                  onPressed: _showExitDialog,
+                ),
+              ],
             ),
           ),
         ],

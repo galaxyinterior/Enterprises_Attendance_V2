@@ -17,6 +17,8 @@ import 'shift_management_screen.dart';
 import 'admin_calendar_screen.dart';
 import '../../core/services/custom_voice_recorder_service.dart';
 
+import '../../core/services/sync_engine.dart';
+
 class AdminDashboardScreen extends StatefulWidget {
   final String shopId;
   final String businessId;
@@ -45,6 +47,34 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _recordedDuration = 0;
   DateTime _selectedLogDate = DateTime.now();
   String _selectedStatusFilter = 'ALL';
+  bool _isAdminSyncing = false;
+
+  Future<void> _triggerAdminManualSync() async {
+    if (_isAdminSyncing) return;
+    setState(() => _isAdminSyncing = true);
+
+    try {
+      final res = await SyncEngine().triggerFullBidirectionalSync(widget.businessId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message'] ?? '✓ Cloud Sync Complete!'),
+          backgroundColor: AppColors.pannaEmerald,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sync notice: $e'),
+          backgroundColor: AppColors.haldiGold,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isAdminSyncing = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -151,6 +181,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Manual Cloud Sync (2-Way)',
+            icon: _isAdminSyncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(color: AppColors.pannaEmerald, strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync_rounded, color: AppColors.pannaEmerald),
+            onPressed: _isAdminSyncing ? null : _triggerAdminManualSync,
+          ),
           IconButton(
             tooltip: 'Shift Settings & Rules',
             icon: const Icon(Icons.alarm_on_rounded, color: AppColors.kesariSaffron),
