@@ -320,8 +320,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       }
 
       final bool isBlinkingNow = (res['isBlinking'] as bool? ?? false) ||
-          ((res['leftEyeOpen'] as double? ?? 1.0) < 0.45) ||
-          ((res['rightEyeOpen'] as double? ?? 1.0) < 0.45);
+          ((res['leftEyeOpen'] as double? ?? 1.0) < 0.60) ||
+          ((res['rightEyeOpen'] as double? ?? 1.0) < 0.60);
 
       // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE
       if (_lockedEmployee != null) {
@@ -332,9 +332,13 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           return;
         }
 
-        // When user blinks eyes, mark attendance immediately!
-        if (isBlinkingNow) {
-          debugPrint('✨ EYE BLINK DETECTED FOR LOCKED EMPLOYEE ($empName)! FINALIZING ATTENDANCE...');
+        final lockElapsedMs = _sessionLockTime != null
+            ? DateTime.now().difference(_sessionLockTime!).inMilliseconds
+            : 0;
+
+        // When user blinks eyes OR after 1.5 seconds of session lock, mark attendance immediately!
+        if (isBlinkingNow || lockElapsedMs >= 1500) {
+          debugPrint('✨ EYE BLINK / AUTO VERIFY DETECTED FOR LOCKED EMPLOYEE ($empName)! FINALIZING ATTENDANCE...');
           await _finalizeAttendanceForLockedEmployee();
           return;
         }
