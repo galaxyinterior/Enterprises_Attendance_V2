@@ -246,7 +246,7 @@ class OfflineDbService {
         List<double> vector = [];
         if (embeddingStr != null && embeddingStr.toString().isNotEmpty) {
           try {
-            final List<dynamic> decoded = jsonDecode(embeddingStr);
+            final List<dynamic> decoded = jsonDecode(embeddingStr as String);
             vector = decoded.map((e) => (e as num).toDouble()).toList();
           } catch (_) {}
         }
