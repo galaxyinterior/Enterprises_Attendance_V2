@@ -235,6 +235,33 @@ class OfflineDbService {
     return result;
   }
 
+  // Get all local employees across all business tenants or specified tenant
+  Future<List<Map<String, dynamic>>> getLocalEmployees([String businessId = '']) async {
+    if (businessId.isEmpty) {
+      final db = await database;
+      final rows = await db.query('local_employees');
+      List<Map<String, dynamic>> result = [];
+      for (var row in rows) {
+        final embeddingStr = row['faceEmbedding'];
+        List<double> vector = [];
+        if (embeddingStr != null && embeddingStr.toString().isNotEmpty) {
+          try {
+            final List<dynamic> decoded = jsonDecode(embeddingStr);
+            vector = decoded.map((e) => (e as num).toDouble()).toList();
+          } catch (_) {}
+        }
+        result.add({
+          'employeeId': row['employeeId'],
+          'businessId': row['businessId'],
+          'fullName': row['fullName'],
+          'faceEmbedding': vector,
+        });
+      }
+      return result;
+    }
+    return getLocalEmployeesWithEmbeddings(businessId);
+  }
+
   // Save/Cache shifts locally in SQLite
   Future<void> saveLocalShifts(List<Map<String, dynamic>> shiftMaps) async {
     final db = await database;
