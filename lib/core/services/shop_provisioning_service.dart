@@ -12,6 +12,7 @@ class ProvisioningResult {
   final String adminEmail;
   final String kioskEmail;
   final bool emailSent;
+  final String provisioningState; // NOT_STARTED / IN_PROGRESS / COMPLETED / PARTIAL_FAILURE / FAILED
   final String? errorMessage;
 
   ProvisioningResult({
@@ -20,6 +21,7 @@ class ProvisioningResult {
     required this.adminEmail,
     required this.kioskEmail,
     required this.emailSent,
+    required this.provisioningState,
     this.errorMessage,
   });
 }
@@ -34,7 +36,65 @@ class ShopProvisioningService {
     return doc.exists;
   }
 
-  /// Provision Shop & create Admin + Kiosk Firebase Auth accounts & send email
+  /// Reject registration application with documented reason and retain history
+  Future<void> rejectRegistration({
+    required String applicationId,
+    required String rejectionReason,
+  }) async {
+    await _firestore.collection(AppConstants.colRegistrationRequests).doc(applicationId).update({
+      'status': 'REJECTED',
+      'rejectionReason': rejectionReason,
+      'reviewedAt': DateTime.now().toIso8601String(),
+      'reviewedBy': 'MASTER',
+    });
+
+    await _firestore.collection(AppConstants.colMasterAuditLogs).add({
+      'action': 'REJECT_REGISTRATION',
+      'applicationId': applicationId,
+      'rejectionReason': rejectionReason,
+      'timestamp': DateTime.now().toIso8601String(),
+      'performedBy': 'MASTER',
+    });
+  }
+
+  /// Update Shop status (active / paused / suspended)
+  Future<void> updateShopStatus(String shopId, String newStatus) async {
+    await _firestore.collection(AppConstants.colBusinesses).doc(shopId).update({
+      'status': newStatus,
+      'updatedAt': DateTime.now().toIso8601String(),
+    });
+
+    await _firestore.collection(AppConstants.colMasterAuditLogs).add({
+      'action': 'UPDATE_SHOP_STATUS',
+      'shopId': shopId,
+      'newStatus': newStatus,
+      'timestamp': DateTime.now().toIso8601String(),
+      'performedBy': 'MASTER',
+    });
+  }
+
+  /// Unpair or revoke a Kiosk terminal device
+  Future<void> unpairDevice(String businessId, String deviceId) async {
+    await _firestore
+        .collection(AppConstants.colBusinesses)
+        .doc(businessId)
+        .collection('devices')
+        .doc(deviceId)
+        .update({
+      'status': 'UNPAIRED',
+      'unpairedAt': DateTime.now().toIso8601String(),
+    });
+
+    await _firestore.collection(AppConstants.colMasterAuditLogs).add({
+      'action': 'UNPAIR_DEVICE',
+      'businessId': businessId,
+      'deviceId': deviceId,
+      'timestamp': DateTime.now().toIso8601String(),
+      'performedBy': 'MASTER',
+    });
+  }
+
+  /// Provision Shop & create Admin + Kiosk Firebase Auth accounts safely with state tracking
   Future<ProvisioningResult> provisionShop({
     required RegistrationRequestModel request,
     required String customShopId,
@@ -47,21 +107,33 @@ class ShopProvisioningService {
     final String kioskEmail = '$shopId@kiosk.in';
     final String recipientEmail = userEmail.trim();
 
+    // 1. Mark request provisioningState as IN_PROGRESS
+    await _firestore.collection(AppConstants.colRegistrationRequests).doc(request.applicationId).update({
+      'provisioningState': 'IN_PROGRESS',
+      'updatedAt': DateTime.now().toIso8601String(),
+    }).catchError((_) {});
+
     try {
-      // 1. Verify Shop ID uniqueness
+      // Verify Shop ID uniqueness
       final exists = await checkShopIdExists(shopId);
       if (exists) {
+        await _firestore.collection(AppConstants.colRegistrationRequests).doc(request.applicationId).update({
+          'provisioningState': 'FAILED',
+          'lastError': 'Shop ID already exists',
+        }).catchError((_) {});
+
         return ProvisioningResult(
           success: false,
           shopId: shopId,
           adminEmail: adminEmail,
           kioskEmail: kioskEmail,
           emailSent: false,
+          provisioningState: 'FAILED',
           errorMessage: 'Shop ID "$shopId" already exists! Please enter a unique Shop ID.',
         );
       }
 
-      // 2. Initialize secondary FirebaseApp to register users in Firebase Auth without logging out current Master Admin session
+      // Initialize secondary FirebaseApp for Auth provisioning without logging out Master Admin
       FirebaseApp secondaryApp;
       try {
         secondaryApp = Firebase.app('ProvisioningApp');
@@ -76,7 +148,7 @@ class ShopProvisioningService {
       String? adminUid;
       String? kioskUid;
 
-      // Register Admin User in Firebase Authentication
+      // Register Admin User in Auth
       try {
         final adminCred = await secondaryAuth.createUserWithEmailAndPassword(
           email: adminEmail,
@@ -94,7 +166,7 @@ class ShopProvisioningService {
         }
       }
 
-      // Register Kiosk User in Firebase Authentication
+      // Register Kiosk User in Auth
       try {
         final kioskCred = await secondaryAuth.createUserWithEmailAndPassword(
           email: kioskEmail,
@@ -112,10 +184,11 @@ class ShopProvisioningService {
         }
       }
 
-      // Sign out secondary auth instance
       await secondaryAuth.signOut();
 
-      // 3. Store Business Document in Firestore
+      final String state = (adminUid != null && kioskUid != null) ? 'COMPLETED' : 'PARTIAL_FAILURE';
+
+      // Store Business Document in Firestore
       final bizModel = BusinessModel(
         businessId: shopId,
         shopId: shopId,
@@ -135,7 +208,7 @@ class ShopProvisioningService {
 
       await _firestore.collection(AppConstants.colBusinesses).doc(shopId).set(bizModel.toMap());
 
-      // 4. Save User records in Firestore users collection
+      // Save User profiles in Firestore users collection
       if (adminUid != null) {
         await _firestore.collection(AppConstants.colUsers).doc(adminUid).set({
           'uid': adminUid,
@@ -159,20 +232,27 @@ class ShopProvisioningService {
         });
       }
 
-      // 5. Delete Application Request from registrationRequests collection upon approval
-      await _firestore.collection(AppConstants.colRegistrationRequests).doc(request.applicationId).delete();
+      // Update Application Request status (Retains application history without immediate deletion)
+      await _firestore.collection(AppConstants.colRegistrationRequests).doc(request.applicationId).update({
+        'status': 'APPROVED',
+        'provisioningState': state,
+        'assignedShopId': shopId,
+        'reviewedAt': DateTime.now().toIso8601String(),
+        'reviewedBy': 'MASTER',
+      });
 
-      // 6. Log Master Audit Trail
+      // Log Master Audit Trail
       await _firestore.collection(AppConstants.colMasterAuditLogs).add({
         'action': 'PROVISION_SHOP',
         'shopId': shopId,
         'shopName': request.shopName,
         'userEmail': recipientEmail,
+        'provisioningState': state,
         'timestamp': DateTime.now().toIso8601String(),
         'performedBy': 'MASTER',
       });
 
-      // 7. Send Credentials Email to User
+      // Send Credentials Email
       final bool emailSent = await EmailNotificationService().sendApprovalCredentialsEmail(
         recipientEmail: recipientEmail,
         shopName: request.shopName,
@@ -190,14 +270,21 @@ class ShopProvisioningService {
         adminEmail: adminEmail,
         kioskEmail: kioskEmail,
         emailSent: emailSent,
+        provisioningState: state,
       );
     } catch (e) {
+      await _firestore.collection(AppConstants.colRegistrationRequests).doc(request.applicationId).update({
+        'provisioningState': 'FAILED',
+        'lastError': e.toString(),
+      }).catchError((_) {});
+
       return ProvisioningResult(
         success: false,
         shopId: shopId,
         adminEmail: adminEmail,
         kioskEmail: kioskEmail,
         emailSent: false,
+        provisioningState: 'FAILED',
         errorMessage: e.toString(),
       );
     }
