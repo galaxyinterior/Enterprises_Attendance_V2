@@ -179,11 +179,14 @@ class FaceRecognitionService {
     final face = faces.first;
     final boundingBox = face.boundingBox;
 
-    // Crop calculation with safety clamping
-    int x = boundingBox.left.toInt().clamp(0, imgW - 1);
-    int y = boundingBox.top.toInt().clamp(0, imgH - 1);
-    int w = boundingBox.width.toInt().clamp(1, imgW - x);
-    int h = boundingBox.height.toInt().clamp(1, imgH - y);
+    // Crop calculation with 10% safety margin padding for optimal forehead/chin coverage
+    final int padX = (boundingBox.width * 0.10).toInt();
+    final int padY = (boundingBox.height * 0.10).toInt();
+
+    int x = (boundingBox.left - padX).toInt().clamp(0, imgW - 1);
+    int y = (boundingBox.top - padY).toInt().clamp(0, imgH - 1);
+    int w = (boundingBox.width + 2 * padX).toInt().clamp(1, imgW - x);
+    int h = (boundingBox.height + 2 * padY).toInt().clamp(1, imgH - y);
 
     final croppedFace = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
     final embedding = extractEmbedding(croppedFace);

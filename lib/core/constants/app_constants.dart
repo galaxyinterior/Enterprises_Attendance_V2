@@ -30,7 +30,7 @@ class AppConstants {
   static const String syncFailed = 'FAILED';
 
   // Face Matching Thresholds
-  static const double faceMatchConfidenceThreshold = 0.45; // Cosine similarity threshold for MobileFaceNet
+  static const double faceMatchConfidenceThreshold = 0.55; // Calibrated Cosine similarity threshold for MobileFaceNet
   static const int faceModelInputSize = 112; // MobileFaceNet tensor size
 
   // Firestore Collections

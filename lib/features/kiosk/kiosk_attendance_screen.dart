@@ -102,27 +102,33 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     });
 
     // 2. Real-time sync from Cloud Firestore to Local SQLite database
-    FirebaseFirestore.instance
-        .collection(AppConstants.colBusinesses)
-        .doc(widget.businessId)
-        .collection(AppConstants.colEmployees)
-        .snapshots()
-        .listen((snapshot) async {
-      final enrolled = snapshot.docs
-          .map((doc) => doc.data())
-          .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
-          .toList();
-      
-      await _offlineDb.saveLocalEmployees(enrolled);
-      final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
-      _logCacheDiagnostics(updatedLocal);
+    try {
+      FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .collection(AppConstants.colEmployees)
+          .snapshots()
+          .listen((snapshot) async {
+        final enrolled = snapshot.docs
+            .map((doc) => doc.data())
+            .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+            .toList();
 
-      if (mounted) {
-        setState(() {
-          _enrolledStaffCache = updatedLocal;
-        });
-      }
-    });
+        await _offlineDb.saveLocalEmployees(enrolled);
+        final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+        _logCacheDiagnostics(updatedLocal);
+
+        if (mounted) {
+          setState(() {
+            _enrolledStaffCache = updatedLocal;
+          });
+        }
+      }, onError: (err) {
+        debugPrint('Firestore real-time sync offline notice: $err. Operating via SQLite local cache.');
+      });
+    } catch (e) {
+      debugPrint('Firestore stream init exception: $e. Operating via SQLite local cache.');
+    }
   }
 
   void _logCacheDiagnostics(List<Map<String, dynamic>> emps) {
