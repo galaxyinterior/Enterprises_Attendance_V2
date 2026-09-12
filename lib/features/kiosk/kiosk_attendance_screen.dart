@@ -283,8 +283,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       }
 
       final bool isBlinkingNow = (res['isBlinking'] as bool? ?? false) ||
-          ((res['leftEyeOpen'] as double? ?? 1.0) < 0.35) ||
-          ((res['rightEyeOpen'] as double? ?? 1.0) < 0.35);
+          ((res['leftEyeOpen'] as double? ?? 1.0) < 0.45) ||
+          ((res['rightEyeOpen'] as double? ?? 1.0) < 0.45);
 
       // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE
       if (_lockedEmployee != null) {

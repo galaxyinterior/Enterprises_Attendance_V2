@@ -83,8 +83,8 @@ class FaceRecognitionService {
       final leftOpen = face.leftEyeOpenProbability ?? 1.0;
       final rightOpen = face.rightEyeOpenProbability ?? 1.0;
 
-      // Eye blink transition: either eye openness drops below 0.35
-      bool isBlinking = (leftOpen < 0.35 || rightOpen < 0.35);
+      // Eye blink transition: either eye openness drops below 0.45
+      bool isBlinking = (leftOpen < 0.45 || rightOpen < 0.45);
       bool isFullyOpen = (leftOpen > 0.70 && rightOpen > 0.70);
       bool isLive = isLiveFaceValid(face);
 
