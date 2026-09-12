@@ -67,7 +67,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
   // Session Lock State for Instant Face Match & Attendance Logging
   Map<String, dynamic>? _lockedEmployee;
-  DateTime? _sessionLockTime;
   bool _isFinalizingAttendance = false;
 
   /// Production Switch: Enforce active eye blink & head micro-movement anti-spoofing
@@ -198,7 +197,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
   void _resetSessionLock() {
     _lockedEmployee = null;
-    _sessionLockTime = null;
     _isProcessing = false;
     _isFinalizingAttendance = false;
     _faceDetectedInFrame = false;
@@ -248,6 +246,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           !_isCameraInitialized ||
           _isProcessing ||
           _isFinalizingAttendance ||
+          _isAttendanceMarked ||
+          _lockedEmployee != null ||
           _isShopPaused ||
           _cameraController == null ||
           !_cameraController!.value.isInitialized ||
@@ -261,6 +261,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   Future<void> _autoDetectFrame() async {
     if (_isProcessing ||
         _isFinalizingAttendance ||
+        _isAttendanceMarked ||
+        _lockedEmployee != null ||
         _isShopPaused ||
         _cameraController == null ||
         !_cameraController!.value.isInitialized ||
@@ -271,28 +273,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     _isProcessing = true;
 
     try {
-      final String currentEmpId = _lockedEmployee != null ? (_lockedEmployee!['employeeId'] ?? 'N/A') : 'N/A';
-
-      // Check for session lock timeout (8 seconds max without valid blink)
-      if (_lockedEmployee != null && _sessionLockTime != null) {
-        final elapsed = DateTime.now().difference(_sessionLockTime!).inSeconds;
-        if (elapsed > 8 && !_isAttendanceMarked && !_isFinalizingAttendance) {
-          debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
-          debugPrint('state=TIMEOUT_NO_BLINK');
-          debugPrint('employeeId=$currentEmpId');
-          debugPrint('locked=true');
-          debugPrint('sessionAgeMs=${elapsed * 1000}');
-
-          if (mounted) {
-            setState(() {
-              _resetSessionLock();
-              _statusMessage = '⏱️ Session timed out. Position face inside camera circle to scan.';
-            });
-          }
-          return;
-        }
-      }
-
       XFile? xFile;
       try {
         xFile = await _cameraController!.takePicture();
@@ -306,17 +286,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       final res = await _faceService.detectFaceAndCheckBlink(xFile.path);
 
       if (res == null || res['hasFace'] != true) {
-        if (_faceDetectedInFrame || _lockedEmployee != null || _noMatchFound) {
-          debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
-          debugPrint('state=FACE_LOST');
-          debugPrint('employeeId=$currentEmpId');
-
-          if (mounted && !_isAttendanceMarked && !_isFinalizingAttendance) {
-            setState(() {
-              _resetSessionLock();
-            });
-          }
-        }
         return;
       }
 
@@ -325,7 +294,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       if (!isSingleFace) {
         debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
         debugPrint('state=MULTIPLE_FACES');
-        debugPrint('employeeId=$currentEmpId');
         if (mounted) {
           setState(() {
             _statusMessage = '⚠️ Multiple faces detected! Please stand alone in camera view.';
@@ -409,7 +377,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                 _lockedEmployee = match;
                 _lastRecognizedEmployee = empData;
                 _lastRecognizedName = empName;
-                _sessionLockTime = DateTime.now();
                 _isAttendanceMarked = false;
                 _noMatchFound = false;
                 _scanFailureReason = null;
@@ -1423,7 +1390,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                               label: Text(
                                 _isAttendanceMarked
                                     ? '✓ PRESENT TODAY • ATTENDANCE LOGGED'
-                                    : '👀 FACE IDENTIFIED • BLINK EYES TO LOG ATTENDANCE',
+                                    : '👀 FACE IDENTIFIED • LOGGING ATTENDANCE...',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: _isAttendanceMarked ? AppColors.pannaEmerald : AppColors.haldiGold,
