@@ -1195,7 +1195,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     .set(advModel.toMap());
 
                 if (ctx.mounted) Navigator.pop(ctx);
-                if (mounted) {
+                if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('💸 Advance Salary of ₹${amt.toStringAsFixed(0)} recorded for $empName!'),
@@ -1562,7 +1562,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             onPressed: () async {
                               final started = await _voiceRecorder.startRecording();
                               if (started) {
-                                setState(() {});
+                                if (mounted) {
+                                  setState(() {});
+                                }
                               } else {
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(

@@ -730,6 +730,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     final customReasonCtrl = TextEditingController();
     bool isSubmitting = false;
 
+    if (!mounted) return;
+
     await showDialog(
       context: context,
       barrierDismissible: false,
@@ -876,7 +878,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                             checkInTime: now,
                           );
 
-                          if (mounted) Navigator.pop(ctx);
+                          if (ctx.mounted) Navigator.pop(ctx);
                         },
                 ),
               ],

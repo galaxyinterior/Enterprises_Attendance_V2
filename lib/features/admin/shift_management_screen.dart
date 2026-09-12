@@ -186,11 +186,13 @@ class _ShiftManagementScreenState extends State<ShiftManagementScreen> {
                             // Cache to Local SQLite DB
                             await _offlineDb.saveLocalShifts([shift.toMap()]);
 
-                            if (mounted) Navigator.pop(ctx);
+                            if (ctx.mounted) Navigator.pop(ctx);
                           } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error saving shift: $e'), backgroundColor: AppColors.sindoorRed),
-                            );
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(content: Text('Error saving shift: $e'), backgroundColor: AppColors.sindoorRed),
+                              );
+                            }
                           } finally {
                             setDialogState(() => isSaving = false);
                           }
