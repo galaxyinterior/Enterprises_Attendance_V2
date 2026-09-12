@@ -100,7 +100,6 @@ class ShiftEngineService {
 
       final endParsed = parseTimeString(customShift.endTime);
       endHour = endParsed['hour']!;
-      endMinute = endParsed['minute']!;
     } else {
       final lower = shiftName.toLowerCase();
       if (lower.contains('morning') || lower.contains('10:00 am')) {
