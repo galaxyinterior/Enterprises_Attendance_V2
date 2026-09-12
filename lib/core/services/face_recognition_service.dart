@@ -179,6 +179,26 @@ class FaceRecognitionService {
     final face = faces.first;
     final boundingBox = face.boundingBox;
 
+    // Quality Check 1: Minimum Face Bounding Box Size
+    if (boundingBox.width < 60 || boundingBox.height < 60 || (boundingBox.width * boundingBox.height) < (imgW * imgH * 0.025)) {
+      return {
+        'success': false,
+        'error': 'Face is too small or too far away. Please move closer to the camera.',
+        'facesDetected': 1,
+        'embedding': null,
+      };
+    }
+
+    // Quality Check 2: Head Orientation & Pose Angle Thresholds
+    if (!isLiveFaceValid(face)) {
+      return {
+        'success': false,
+        'error': 'Invalid face orientation. Please look straight at the camera.',
+        'facesDetected': 1,
+        'embedding': null,
+      };
+    }
+
     // Crop calculation with 10% safety margin padding for optimal forehead/chin coverage
     final int padX = (boundingBox.width * 0.10).toInt();
     final int padY = (boundingBox.height * 0.10).toInt();
@@ -466,6 +486,41 @@ class FaceRecognitionService {
     if (norm > 0 && isFinite && normalized.length == dim) {
       debugPrint('✓ Synthesized ${embeddings.length} Multi-Angle Vectors into ${dim}D Embedding (Norm: ${norm.toStringAsFixed(4)})');
       return normalized;
+    }
+    return null;
+  }
+
+  /// Check if a newly generated face embedding matches an already enrolled employee in the tenant
+  Future<Map<String, dynamic>?> checkDuplicateEnrolledFace({
+    required List<double> newEmbedding,
+    required List<Map<String, dynamic>> existingEmployees,
+    String? excludeEmployeeId,
+    double duplicateThreshold = 0.70,
+  }) async {
+    for (var emp in existingEmployees) {
+      final empId = emp['employeeId'] ?? emp['empId'] ?? '';
+      if (excludeEmployeeId != null && empId == excludeEmployeeId) continue;
+      if (emp['faceEmbedding'] == null) continue;
+
+      List<double> enrolledVec = [];
+      try {
+        final rawList = emp['faceEmbedding'] as List;
+        enrolledVec = rawList.map((x) => (x as num).toDouble()).toList();
+      } catch (_) {
+        continue;
+      }
+
+      if (enrolledVec.length != newEmbedding.length) continue;
+
+      final similarity = calculateCosineSimilarity(newEmbedding, enrolledVec);
+      if (similarity >= duplicateThreshold) {
+        return {
+          'isDuplicate': true,
+          'matchedEmployeeId': empId,
+          'matchedEmployeeName': emp['fullName'] ?? emp['employeeName'] ?? 'Existing Staff',
+          'similarity': similarity,
+        };
+      }
     }
     return null;
   }

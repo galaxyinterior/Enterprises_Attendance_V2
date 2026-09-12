@@ -143,6 +143,25 @@ class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
 
       if (res['success'] == true && res['embedding'] != null) {
         final List<double> vec = res['embedding'] as List<double>;
+
+        // Check for duplicate face enrollment excluding current employee
+        final existingStaff = await OfflineDbService().getLocalEmployees();
+        final dupCheck = await _faceService.checkDuplicateEnrolledFace(
+          newEmbedding: vec,
+          existingEmployees: existingStaff,
+          excludeEmployeeId: widget.employee.employeeId,
+        );
+
+        if (dupCheck != null && dupCheck['isDuplicate'] == true) {
+          final String matchedName = dupCheck['matchedEmployeeName'] ?? 'Existing Staff';
+          setState(() {
+            _capturedFaceBytes = null;
+            _synthesizedFaceEmbedding = null;
+            _faceStatusMessage = '❌ Duplicate Face Detected! Already registered for "$matchedName".';
+          });
+          return;
+        }
+
         setState(() {
           _capturedFaceBytes = bytes;
           _synthesizedFaceEmbedding = vec;
@@ -151,7 +170,7 @@ class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
       } else {
         final String err = res['error'] ?? 'Face not detected clearly';
         setState(() {
-          _faceStatusMessage = '❌ $err. Position face straight looking at camera.';
+          _faceStatusMessage = '❌ $err';
         });
       }
     } catch (e) {

@@ -127,6 +127,24 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
 
       if (res['success'] == true && res['embedding'] != null) {
         final List<double> vec = res['embedding'] as List<double>;
+
+        // Check for duplicate face enrollment across existing employees in local DB
+        final existingStaff = await OfflineDbService().getLocalEmployees();
+        final dupCheck = await _faceService.checkDuplicateEnrolledFace(
+          newEmbedding: vec,
+          existingEmployees: existingStaff,
+        );
+
+        if (dupCheck != null && dupCheck['isDuplicate'] == true) {
+          final String matchedName = dupCheck['matchedEmployeeName'] ?? 'Existing Staff';
+          setState(() {
+            _capturedFaceBytes = null;
+            _enrolledFaceEmbedding = null;
+            _faceStatusMessage = '❌ Duplicate Face Detected! Already registered for "$matchedName".';
+          });
+          return;
+        }
+
         setState(() {
           _capturedFaceBytes = bytes;
           _enrolledFaceEmbedding = vec;
@@ -135,7 +153,7 @@ class _AddEmployeeScreenState extends State<AddEmployeeScreen> {
       } else {
         final String err = res['error'] ?? 'Face not detected clearly';
         setState(() {
-          _faceStatusMessage = '❌ $err. Position face straight looking at camera.';
+          _faceStatusMessage = '❌ $err';
         });
       }
     } catch (e) {
