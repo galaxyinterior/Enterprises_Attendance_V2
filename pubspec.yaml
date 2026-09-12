@@ -53,6 +53,7 @@ dependencies:
   provider: ^6.1.2
   google_fonts: ^6.2.1
   shared_preferences: ^2.3.5
+  crypto: ^3.0.6
 
 dependency_overrides:
   record_platform_interface: 1.2.0

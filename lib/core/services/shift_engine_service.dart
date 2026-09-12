@@ -88,7 +88,6 @@ class ShiftEngineService {
     int deadlineHour = 9;
     int deadlineMinute = 15;
     int endHour = 18;
-    int endMinute = 0;
 
     if (customShift != null) {
       final startParsed = parseTimeString(customShift.startTime);
