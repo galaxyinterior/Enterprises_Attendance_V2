@@ -333,11 +333,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
         if (!_spokenAnnouncementIds.contains(docId) && message.isNotEmpty) {
           _spokenAnnouncementIds.add(docId);
-          if (type == 'emergency') {
-            _voiceService.speakEmergencyAlert(message);
-          } else {
-            _voiceService.speakAlert("Attention: $message");
-          }
+          _voiceService.speakAnnouncement(message, type);
         }
       } else {
         if (mounted && _activeAnnouncementData != null) {
@@ -429,6 +425,16 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                 ),
               ],
             ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.volume_up_rounded, color: Colors.white, size: 28),
+            tooltip: 'Re-Play Announcement Voice TTS',
+            onPressed: () {
+              if (message.isNotEmpty) {
+                _voiceService.speakAnnouncement(message, type);
+              }
+            },
           ),
         ],
       ),
