@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -64,15 +63,13 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   Map<String, dynamic>? _activeAnnouncementData;
   final Set<String> _spokenAnnouncementIds = {};
 
-  // Eye Blink & Natural Micro Movement Anti-Spoofing & Liveness State
-  bool _blinkVerified = false;
-  bool _movementVerified = false;
-  double? _initialHeadYaw;
-  double? _initialHeadPitch;
-  DateTime? _faceTrackStartTime;
-  bool _hasSpokenBlinkPrompt = false;
-  bool _isPhotoSpoofDetected = false;
   bool _isAttendanceMarked = false;
+
+  // Session Lock State for Instant Face Preview & Eye Blink Logging
+  Map<String, dynamic>? _lockedEmployee;
+  String? _lockedEmployeeName;
+  DateTime? _sessionLockTime;
+  bool _isFinalizingAttendance = false;
 
   /// Production Switch: Enforce active eye blink & head micro-movement anti-spoofing
   bool requireLivenessForRecognition = true;
@@ -200,12 +197,28 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     }
   }
 
+  void _resetSessionLock() {
+    _lockedEmployee = null;
+    _lockedEmployeeName = null;
+    _sessionLockTime = null;
+    _isProcessing = false;
+    _isFinalizingAttendance = false;
+    _faceDetectedInFrame = false;
+    _lastRecognizedName = null;
+    _lastRecognizedEmployee = null;
+    _noMatchFound = false;
+    _scanFailureReason = null;
+    _isAttendanceMarked = false;
+    _statusMessage = '👁️ Position face inside camera circle to scan';
+  }
+
   void _startAutoScanner() {
     _autoScanTimer?.cancel();
     _autoScanTimer = Timer.periodic(const Duration(milliseconds: 800), (_) async {
       if (!mounted ||
           !_isCameraInitialized ||
           _isProcessing ||
+          _isFinalizingAttendance ||
           _isShopPaused ||
           _cameraController == null ||
           !_cameraController!.value.isInitialized ||
@@ -219,41 +232,46 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   Future<void> _autoDetectFrame() async {
     try {
       if (_isProcessing ||
+          _isFinalizingAttendance ||
+          _isShopPaused ||
           _cameraController == null ||
           !_cameraController!.value.isInitialized ||
           _cameraController!.value.isTakingPicture) {
         return;
       }
+
+      // Check for session lock timeout (8 seconds max without blink)
+      if (_lockedEmployee != null && _sessionLockTime != null) {
+        final elapsed = DateTime.now().difference(_sessionLockTime!).inSeconds;
+        if (elapsed > 8 && !_isAttendanceMarked && !_isFinalizingAttendance) {
+          if (mounted) {
+            setState(() {
+              _resetSessionLock();
+              _statusMessage = '⏱️ Session timed out. Position face inside camera circle to scan.';
+            });
+          }
+          return;
+        }
+      }
+
       final xFile = await _cameraController!.takePicture();
       final bytes = await xFile.readAsBytes();
 
+      // Fast ML Kit Face & Blink Detection
       final res = await _faceService.detectFaceAndCheckBlink(xFile.path);
 
       if (res == null || res['hasFace'] != true) {
-        if (_faceDetectedInFrame || _faceTrackStartTime != null) {
-          if (mounted) {
+        if (_faceDetectedInFrame || _lockedEmployee != null) {
+          if (mounted && !_isAttendanceMarked && !_isFinalizingAttendance) {
             setState(() {
-              _faceDetectedInFrame = false;
-              _blinkVerified = false;
-              _movementVerified = false;
-              _initialHeadYaw = null;
-              _initialHeadPitch = null;
-              _faceTrackStartTime = null;
-              _hasSpokenBlinkPrompt = false;
-              _isPhotoSpoofDetected = false;
-              _isAttendanceMarked = false;
-              _lastRecognizedEmployee = null;
-              _lastRecognizedName = null;
-              _noMatchFound = false;
-              _scanFailureReason = null;
-              _statusMessage = '👁️ Position face inside camera circle to scan';
+              _resetSessionLock();
             });
           }
         }
         return;
       }
 
-      // Check live face orientation / head angle tolerance (Phase 3)
+      // Live angle verification
       if (res['isLiveValid'] == false) {
         if (mounted) {
           setState(() {
@@ -264,141 +282,275 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         return;
       }
 
-      // STEP A: Instant Face Recognition Preview (Confirms Database Connection & Displays Employee Info Card Immediately!)
-      if (_lastRecognizedEmployee == null && !_noMatchFound) {
-        final processRes = await _faceService.processFaceFromBytesDetailed(
-          bytes: bytes,
-          tempFilePath: xFile.path,
-          context: 'PREVIEW_MATCH',
-        );
+      final bool isBlinkingNow = (res['isBlinking'] as bool? ?? false) ||
+          ((res['leftEyeOpen'] as double? ?? 1.0) < 0.35) ||
+          ((res['rightEyeOpen'] as double? ?? 1.0) < 0.35);
 
-        if (processRes['success'] == true && processRes['embedding'] != null) {
-          final targetVector = processRes['embedding'] as List<double>;
-          final match = _faceService.matchFace(
-            targetEmbedding: targetVector,
-            enrolledEmployees: _enrolledStaffCache,
-          );
+      // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE
+      if (_lockedEmployee != null) {
+        final empName = _lockedEmployeeName ?? 'Employee';
 
-          if (match != null) {
-            final String empName = match['employeeName'] ?? 'Employee';
-            if (mounted) {
-              setState(() {
-                _lastRecognizedEmployee = match['employeeData'];
-                _lastRecognizedName = empName;
-                _noMatchFound = false;
-                _scanFailureReason = null;
-              });
-            }
-          } else {
-            if (mounted) {
-              setState(() {
-                _noMatchFound = true;
-                _scanFailureReason = 'Unregistered Face • Database Connected (${_enrolledStaffCache.length} enrolled staff)';
-              });
-            }
-          }
-        }
-      }
-
-      // STEP B: Enforce Dual Liveness Verification (Eye Blink + Natural Head Micro-Movement)
-      if (requireLivenessForRecognition) {
-        // Face is detected & orientation is valid!
-        _faceTrackStartTime ??= DateTime.now();
-        final elapsedMs = DateTime.now().difference(_faceTrackStartTime!).inMilliseconds;
-
-        final bool isBlinkingNow = res['isBlinking'] as bool? ?? false;
-        final double leftEyeOpen = (res['leftEyeOpen'] as double? ?? 1.0);
-        final double rightEyeOpen = (res['rightEyeOpen'] as double? ?? 1.0);
-
-        final double currentYaw = (res['headEulerY'] as double? ?? 0.0);
-        final double currentPitch = (res['headEulerX'] as double? ?? 0.0);
-
-        _initialHeadYaw ??= currentYaw;
-        _initialHeadPitch ??= currentPitch;
-
-        // 1. Check Eye Blink Transition (either eye closes below 0.35 or ML Kit blink flag)
-        if (isBlinkingNow || leftEyeOpen < 0.35 || rightEyeOpen < 0.35) {
-          _blinkVerified = true;
-          _isPhotoSpoofDetected = false;
-          debugPrint('✨ EYE BLINK VERIFIED FOR LIVE USER! (Left: $leftEyeOpen, Right: $rightEyeOpen)');
-        }
-
-        // 2. Check Natural Micro Head Movement (rotation shift >= 3.5 degrees)
-        final double deltaYaw = (currentYaw - _initialHeadYaw!).abs();
-        final double deltaPitch = (currentPitch - _initialHeadPitch!).abs();
-        if (deltaYaw >= 3.5 || deltaPitch >= 3.5) {
-          _movementVerified = true;
-          _isPhotoSpoofDetected = false;
-          debugPrint('✨ HEAD MOVEMENT VERIFIED FOR LIVE USER! (dYaw: ${deltaYaw.toStringAsFixed(1)}°, dPitch: ${deltaPitch.toStringAsFixed(1)}°)');
-        }
-
-        final bool isLivenessPassed = _blinkVerified && _movementVerified;
-
-        if (!isLivenessPassed) {
-          // Speak voice prompt once per face encounter
-          if (!_hasSpokenBlinkPrompt) {
-            _hasSpokenBlinkPrompt = true;
-            _voiceService.speakLivenessPrompt();
-          }
-
-          // Anti-Spoof Rejection: Still image/video without both blink & movement for > 3.0 seconds
-          if (elapsedMs > 3000) {
-            if (!_isPhotoSpoofDetected) {
-              _isPhotoSpoofDetected = true;
-              _voiceService.speakAlert('Photo or video screen detected. Attendance rejected. Please blink eyes and turn head naturally.');
-            }
-            if (mounted) {
-              setState(() {
-                _faceDetectedInFrame = true;
-                _statusMessage = '🚫 PHOTO / VIDEO SPOOF DETECTED! Active blink & head movement required.';
-              });
-            }
-            return;
-          }
-
-          // Waiting for user to complete blink and natural head movement
-          if (mounted) {
-            String missingAction = '';
-            if (!_blinkVerified && !_movementVerified) {
-              missingAction = 'Blink Eyes & Turn Head Slightly';
-            } else if (!_blinkVerified) {
-              missingAction = 'Blink Your Eyes';
-            } else {
-              missingAction = 'Turn Head Slightly';
-            }
-
-            final String personLabel = _lastRecognizedName != null ? 'Welcome $_lastRecognizedName!' : 'Face Detected';
-
-            setState(() {
-              _faceDetectedInFrame = true;
-              _statusMessage = '👀 $personLabel — $missingAction to log attendance!';
-            });
-          }
+        if (_isAttendanceMarked) {
+          // Attendance already logged, showing success screen
           return;
         }
 
-        // Dual Liveness Verified! Reset tracking for next scan
-        _blinkVerified = false;
-        _movementVerified = false;
-        _initialHeadYaw = null;
-        _initialHeadPitch = null;
-        _faceTrackStartTime = null;
-        _hasSpokenBlinkPrompt = false;
-        _isPhotoSpoofDetected = false;
+        // When user blinks eyes, mark attendance immediately!
+        if (isBlinkingNow) {
+          debugPrint('✨ EYE BLINK DETECTED FOR LOCKED EMPLOYEE ($empName)! FINALIZING ATTENDANCE...');
+          await _finalizeAttendanceForLockedEmployee();
+          return;
+        }
+
+        // Still waiting for eye blink
+        if (mounted) {
+          setState(() {
+            _faceDetectedInFrame = true;
+            _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to confirm & mark attendance!';
+          });
+        }
+        return;
       }
 
+      // CASE B: SESSION UNLOCKED — Perform fast face match to lock session!
+      if (!_noMatchFound && !_isProcessing) {
+        _isProcessing = true;
+        try {
+          final processRes = await _faceService.processFaceFromBytesDetailed(
+            bytes: bytes,
+            tempFilePath: xFile.path,
+            context: 'PREVIEW_MATCH',
+          );
+
+          if (processRes['success'] == true && processRes['embedding'] != null) {
+            final targetVector = processRes['embedding'] as List<double>;
+            var match = _faceService.matchFace(
+              targetEmbedding: targetVector,
+              enrolledEmployees: _enrolledStaffCache,
+            );
+
+            // Cloud fallback search if local cache is empty or no match
+            if (match == null && _enrolledStaffCache.isEmpty) {
+              try {
+                final snapshot = await FirebaseFirestore.instance
+                    .collection(AppConstants.colBusinesses)
+                    .doc(widget.businessId)
+                    .collection(AppConstants.colEmployees)
+                    .get()
+                    .timeout(const Duration(seconds: 3));
+
+                final cloudEmps = snapshot.docs
+                    .map((doc) => doc.data())
+                    .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+                    .toList();
+
+                if (cloudEmps.isNotEmpty) {
+                  await _offlineDb.saveLocalEmployees(cloudEmps);
+                  _enrolledStaffCache = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+                  match = _faceService.matchFace(
+                    targetEmbedding: targetVector,
+                    enrolledEmployees: _enrolledStaffCache,
+                  );
+                }
+              } catch (_) {}
+            }
+
+            if (match != null) {
+              final String empName = match['employeeName'];
+              final empData = match['employeeData'] ?? {};
+
+              if (mounted) {
+                setState(() {
+                  _lockedEmployee = match;
+                  _lockedEmployeeName = empName;
+                  _lastRecognizedEmployee = empData;
+                  _lastRecognizedName = empName;
+                  _sessionLockTime = DateTime.now();
+                  _isAttendanceMarked = false;
+                  _noMatchFound = false;
+                  _scanFailureReason = null;
+                  _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to log attendance!';
+                });
+              }
+
+              try {
+                _voiceService.speakLivenessPrompt();
+              } catch (_) {}
+              return;
+            } else {
+              if (mounted) {
+                setState(() {
+                  _noMatchFound = true;
+                  _scanFailureReason = 'Unregistered Face • Database Connected (${_enrolledStaffCache.length} enrolled staff)';
+                  _statusMessage = '❌ Unregistered Face — No Employee Match Found';
+                });
+              }
+            }
+          }
+        } finally {
+          _isProcessing = false;
+        }
+      }
+    } catch (e) {
+      debugPrint('Auto detect frame exception: $e');
+    }
+  }
+
+  Future<void> _finalizeAttendanceForLockedEmployee() async {
+    if (_isFinalizingAttendance || _lockedEmployee == null) return;
+    _isFinalizingAttendance = true;
+
+    try {
+      final match = _lockedEmployee!;
+      final String empId = match['employeeId'];
+      final String name = match['employeeName'];
+      final double confidence = match['confidence'] ?? 0.95;
+      final Map<String, dynamic> empData = match['employeeData'] ?? {};
+
+      final now = DateTime.now();
+      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+      // 1. Check for today's duplicate attendance
+      final todayRecord = await _offlineDb.getTodayAttendanceRecord(empId, dateStr);
+      final isRecentDuplicate = await _offlineDb.hasRecentAttendance(empId, dateStr);
+
+      if (todayRecord != null || isRecentDuplicate) {
+        final String statusText = todayRecord != null ? (todayRecord['status'] ?? 'LOGGED') : 'LOGGED';
+        try {
+          await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
+        } catch (_) {}
+        if (mounted) {
+          setState(() {
+            _lastRecognizedEmployee = empData;
+            _lastRecognizedName = name;
+            _isAttendanceMarked = true;
+            _statusMessage = '✓ $name — Attendance Already Logged Today ($statusText)';
+          });
+        }
+      } else {
+        // Shift Evaluation
+        final localShifts = await _offlineDb.getLocalShifts(widget.businessId);
+        ShiftModel? matchedShift;
+        final String empShiftName = empData['assignedShiftId'] ?? empData['assignedShift'] ?? '';
+        if (localShifts.isNotEmpty) {
+          final found = localShifts.firstWhere(
+            (s) => s['shiftName'] == empShiftName || s['shiftId'] == empShiftName,
+            orElse: () => localShifts.first,
+          );
+          matchedShift = ShiftModel.fromMap(found);
+        }
+
+        final shiftResult = ShiftEngineService().evaluateCheckInStatus(
+          checkInTime: now,
+          assignedShiftId: empShiftName,
+          customShift: matchedShift,
+        );
+
+        bool isHolidayWork = false;
+        try {
+          final holSnap = await FirebaseFirestore.instance
+              .collection(AppConstants.colBusinesses)
+              .doc(widget.businessId)
+              .collection('holidays')
+              .where('date', isEqualTo: dateStr)
+              .get()
+              .timeout(const Duration(seconds: 2));
+          if (holSnap.docs.isNotEmpty) {
+            isHolidayWork = true;
+          }
+        } catch (_) {}
+
+        if (shiftResult.isPastDeadline) {
+          await _handleLateAttendanceWithReason(
+            empId: empId,
+            name: name,
+            confidence: confidence,
+            empData: empData,
+            shiftResult: shiftResult,
+            now: now,
+            dateStr: dateStr,
+            isHolidayWork: isHolidayWork,
+          );
+        } else {
+          final attendance = AttendanceModel(
+            attendanceId: ShiftEngineService().generateDeterministicAttendanceId(
+              businessId: widget.businessId,
+              employeeId: empId,
+              date: dateStr,
+            ),
+            businessId: widget.businessId,
+            employeeId: empId,
+            employeeName: name,
+            date: dateStr,
+            shiftId: shiftResult.shiftName,
+            checkInTime: now,
+            status: shiftResult.status,
+            approvalStatus: 'APPROVED',
+            confidence: confidence,
+            syncStatus: AppConstants.syncPending,
+            isHolidayWork: isHolidayWork,
+            holidayBonusStatus: isHolidayWork ? 'PENDING' : null,
+            createdAt: now,
+            updatedAt: now,
+          );
+
+          // 1. Save SQLite
+          await _offlineDb.insertAttendance(attendance);
+
+          // 2. Sync Firestore
+          try {
+            FirebaseFirestore.instance
+                .collection(AppConstants.colBusinesses)
+                .doc(widget.businessId)
+                .collection(AppConstants.colAttendance)
+                .doc(attendance.attendanceId)
+                .set(attendance.toMap())
+                .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
+                .catchError((err) => debugPrint('Background cloud sync queued: $err'));
+          } catch (err) {
+            debugPrint('Background cloud sync notice: $err');
+          }
+
+          // 3. Email Alert
+          try {
+            EmailNotificationService().sendPresentAttendanceEmail(
+              employeeName: name,
+              employeeId: empId,
+              shiftName: shiftResult.shiftName,
+              shopId: widget.shopId,
+              checkInTime: now,
+            );
+          } catch (_) {}
+
+          // Voice Greeting
+          try {
+            await _voiceService.speakCheckInGreeting(name);
+          } catch (_) {}
+
+          if (mounted) {
+            setState(() {
+              _lastRecognizedEmployee = empData;
+              _lastRecognizedName = name;
+              _isAttendanceMarked = true;
+              _noMatchFound = false;
+              _scanFailureReason = null;
+              _statusMessage = '✓ Welcome $name! ${shiftResult.statusLabel}.';
+            });
+          }
+        }
+      }
+
+      // Display success message for 4 seconds, then reset session lock
+      await Future.delayed(const Duration(seconds: 4));
       if (mounted) {
         setState(() {
-          _statusMessage = requireLivenessForRecognition
-              ? '✨ Active Liveness Verified! Processing Biometric Attendance...'
-              : '✨ Face Detected! Processing Biometric Attendance...';
+          _resetSessionLock();
         });
       }
-
-      // Trigger attendance scan (Embedding -> Matching -> Save Attendance)
-      await _processFaceScanWithFile(xFile.path, bytes);
     } catch (e) {
-      debugPrint('Auto check frame error: $e');
+      debugPrint('Error finalizing attendance: $e');
+    } finally {
+      _isFinalizingAttendance = false;
     }
   }
 
@@ -595,276 +747,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     );
   }
 
-  // Trigger Real Face Scan & Recognition from live camera frame
-  Future<void> _processFaceScanWithFile(String tempPath, Uint8List bytes) async {
-    if (_isShopPaused || _isProcessing) return;
 
-    setState(() {
-      _isProcessing = true;
-      _statusMessage = '⚡ Verifying face in Local RAM Cache...';
-    });
-
-    try {
-      final res = await _faceService.processFaceFromBytesDetailed(
-        bytes: bytes,
-        tempFilePath: tempPath,
-        context: 'KIOSK',
-      );
-
-      final int facesCount = res['facesDetected'] as int? ?? 0;
-      if (facesCount > 1) {
-        try {
-          await _voiceService.speakAlert('Only one person should stand in front of the kiosk.');
-        } catch (_) {}
-        setState(() {
-          _lastRecognizedEmployee = null;
-          _lastRecognizedName = null;
-          _noMatchFound = true;
-          _scanFailureReason = 'Multiple faces detected in camera view ($facesCount faces).';
-          _statusMessage = '⚠️ Only one person should stand in front of the kiosk.';
-        });
-        return;
-      }
-
-      if (res['success'] != true || res['embedding'] == null) {
-        final String err = res['error'] as String? ?? 'Position face clearly';
-        if (facesCount == 1) {
-          setState(() {
-            _statusMessage = '⚠️ $err';
-          });
-        }
-        return;
-      }
-
-      final List<double> targetVector = res['embedding'] as List<double>;
-
-      // Step 1: Perform 100% offline local SQLite memory match against pre-loaded RAM cache
-      var match = _faceService.matchFace(
-        targetEmbedding: targetVector,
-        enrolledEmployees: _enrolledStaffCache,
-      );
-
-      // Step 2: If face NOT found in local DB, log and search Cloud Database asynchronously with 3s timeout
-      if (match == null) {
-        debugPrint('❌ Face vector not found in Local RAM Cache (${_enrolledStaffCache.length} cached). Searching Cloud Firebase Database...');
-        setState(() {
-          _statusMessage = '☁️ Searching Cloud Database...';
-        });
-
-        try {
-          final snapshot = await FirebaseFirestore.instance
-              .collection(AppConstants.colBusinesses)
-              .doc(widget.businessId)
-              .collection(AppConstants.colEmployees)
-              .get()
-              .timeout(const Duration(seconds: 3));
-
-          final cloudEmps = snapshot.docs
-              .map((doc) => doc.data())
-              .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
-              .toList();
-
-          debugPrint('Fetched ${cloudEmps.length} total staff documents from Cloud Firebase.');
-
-          if (cloudEmps.isNotEmpty) {
-            // Save new documents to local SQLite DB
-            await _offlineDb.saveLocalEmployees(cloudEmps);
-            final freshLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
-            _enrolledStaffCache = freshLocal;
-
-            // Re-run instant matching on updated local database!
-            match = _faceService.matchFace(
-              targetEmbedding: targetVector,
-              enrolledEmployees: _enrolledStaffCache,
-            );
-
-            if (match != null) {
-              debugPrint('✓ Face successfully matched in newly downloaded Cloud Database record!');
-              setState(() {
-                _statusMessage = '✓ Employee Found in Cloud! Syncing & Marking Attendance...';
-              });
-            }
-          }
-        } catch (e) {
-          debugPrint('Cloud fallback sync info (offline or timeout): $e');
-        }
-      }
-
-      if (match != null) {
-        final String empId = match['employeeId'];
-        final String name = match['employeeName'];
-        final double confidence = match['confidence'];
-        final Map<String, dynamic> empData = match['employeeData'] ?? {};
-
-        final now = DateTime.now();
-        final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-
-        // Check for 1-week local SQLite attendance history safeguard
-        final todayRecord = await _offlineDb.getTodayAttendanceRecord(empId, dateStr);
-        final isRecentDuplicate = await _offlineDb.hasRecentAttendance(empId, dateStr);
-
-        if (todayRecord != null || isRecentDuplicate) {
-          final String statusText = todayRecord != null ? (todayRecord['status'] ?? 'LOGGED') : 'LOGGED';
-          try {
-            await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
-          } catch (_) {}
-          setState(() {
-            _lastRecognizedEmployee = empData;
-            _lastRecognizedName = name;
-            _isAttendanceMarked = true;
-            _statusMessage = '✓ $name — Attendance Already Logged Today ($statusText)';
-          });
-        } else {
-          // Phase 4: Evaluate assigned shift schedule & attendance status
-          // Fetch local cached custom shifts if available
-          final localShifts = await _offlineDb.getLocalShifts(widget.businessId);
-          ShiftModel? matchedShift;
-          final String empShiftName = empData['assignedShiftId'] ?? empData['assignedShift'] ?? '';
-          if (localShifts.isNotEmpty) {
-            final found = localShifts.firstWhere(
-              (s) => s['shiftName'] == empShiftName || s['shiftId'] == empShiftName,
-              orElse: () => localShifts.first,
-            );
-            matchedShift = ShiftModel.fromMap(found);
-          }
-
-          final shiftResult = ShiftEngineService().evaluateCheckInStatus(
-            checkInTime: now,
-            assignedShiftId: empShiftName,
-            customShift: matchedShift,
-          );
-
-          // Check if today is a shop holiday
-          bool isHolidayWork = false;
-          try {
-            final holSnap = await FirebaseFirestore.instance
-                .collection(AppConstants.colBusinesses)
-                .doc(widget.businessId)
-                .collection('holidays')
-                .where('date', isEqualTo: dateStr)
-                .get()
-                .timeout(const Duration(seconds: 2));
-            if (holSnap.docs.isNotEmpty) {
-              isHolidayWork = true;
-            }
-          } catch (_) {}
-
-          if (shiftResult.isPastDeadline) {
-            await _handleLateAttendanceWithReason(
-              empId: empId,
-              name: name,
-              confidence: confidence,
-              empData: empData,
-              shiftResult: shiftResult,
-              now: now,
-              dateStr: dateStr,
-              isHolidayWork: isHolidayWork,
-            );
-          } else {
-            final attendance = AttendanceModel(
-              attendanceId: ShiftEngineService().generateDeterministicAttendanceId(
-                businessId: widget.businessId,
-                employeeId: empId,
-                date: dateStr,
-              ),
-              businessId: widget.businessId,
-              employeeId: empId,
-              employeeName: name,
-              date: dateStr,
-              shiftId: shiftResult.shiftName,
-              checkInTime: now,
-              status: shiftResult.status,
-              approvalStatus: 'APPROVED',
-              confidence: confidence,
-              syncStatus: AppConstants.syncPending,
-              isHolidayWork: isHolidayWork,
-              holidayBonusStatus: isHolidayWork ? 'PENDING' : null,
-              createdAt: now,
-              updatedAt: now,
-            );
-
-            // 1. Save to offline SQLite database immediately (100% Offline-First)
-            await _offlineDb.insertAttendance(attendance);
-
-            // 2. Queue Cloud Firestore sync asynchronously in background
-            try {
-              FirebaseFirestore.instance
-                  .collection(AppConstants.colBusinesses)
-                  .doc(widget.businessId)
-                  .collection(AppConstants.colAttendance)
-                  .doc(attendance.attendanceId)
-                  .set(attendance.toMap())
-                  .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
-                  .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
-            } catch (err) {
-              debugPrint('Background cloud sync queue notice: $err');
-            }
-
-            // 3. Send Automatic Email Alert via Gmail SMTP
-            try {
-              EmailNotificationService().sendPresentAttendanceEmail(
-                employeeName: name,
-                employeeId: empId,
-                shiftName: shiftResult.shiftName,
-                shopId: widget.shopId,
-                checkInTime: now,
-              );
-            } catch (err) {
-              debugPrint('Background email alert notice: $err');
-            }
-
-            // Speak personalized voice greeting
-            try {
-              await _voiceService.speakCheckInGreeting(name);
-            } catch (_) {}
-
-            setState(() {
-              _lastRecognizedEmployee = empData;
-              _lastRecognizedName = name;
-              _isAttendanceMarked = true;
-              _noMatchFound = false;
-              _scanFailureReason = null;
-              _statusMessage = '✓ Welcome $name! ${shiftResult.statusLabel}.';
-            });
-          }
-        }
-      } else {
-        try {
-          await _voiceService.speakAlert('Face not recognized. Please try again.');
-        } catch (_) {}
-        final String reason = _enrolledStaffCache.isEmpty
-            ? 'No enrolled staff records found in local DB. Please add employees in Admin.'
-            : 'Unregistered face (No match found in ${_enrolledStaffCache.length} enrolled staff)';
-        setState(() {
-          _lastRecognizedEmployee = null;
-          _lastRecognizedName = null;
-          _noMatchFound = true;
-          _scanFailureReason = reason;
-          _statusMessage = '❌ Face Not Recognized — No Match Found';
-        });
-      }
-    } catch (e, stack) {
-      debugPrint('Error in kiosk auto scan: $e\n$stack');
-      setState(() {
-        _statusMessage = '⚠️ Please position face clearly inside camera circle';
-      });
-    } finally {
-      // Display success welcome message for 5 seconds; for failed/unregistered scans, reset in 1.5s for fast seamless retries
-      final int delaySeconds = (_lastRecognizedName != null) ? 5 : 2;
-      await Future.delayed(Duration(seconds: delaySeconds));
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-          _faceDetectedInFrame = false;
-          _lastRecognizedName = null;
-          _lastRecognizedEmployee = null;
-          _noMatchFound = false;
-          _scanFailureReason = null;
-          _statusMessage = '👁️ Position face inside camera circle to scan';
-        });
-      }
-    }
-  }
 
   Future<void> _handleLateAttendanceWithReason({
     required String empId,
@@ -876,7 +759,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     required String dateStr,
     bool isHolidayWork = false,
   }) async {
-    await _voiceService.speakAlert('$name, you are late for attendance. Please mark with reason.');
+    try {
+      await _voiceService.speakAlert('$name, you are late for attendance. Please select reason.');
+    } catch (_) {}
 
     String selectedReason = 'Traffic Jam';
     final customReasonCtrl = TextEditingController();
@@ -887,9 +772,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) {
+      builder: (dialogCtx) {
         return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
+          builder: (context, setDialogState) {
             return AlertDialog(
               backgroundColor: AppColors.cardDark,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -976,20 +861,18 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                     backgroundColor: AppColors.kesariSaffron,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-                  label: const Text('MARK WITH REASON', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  icon: isSubmitting
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                  label: Text(isSubmitting ? 'SUBMITTING...' : 'MARK WITH REASON', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   onPressed: isSubmitting
                       ? null
                       : () async {
                           setDialogState(() => isSubmitting = true);
+                          final messenger = ScaffoldMessenger.of(context);
                           final fullReason = customReasonCtrl.text.trim().isNotEmpty
                               ? '$selectedReason — ${customReasonCtrl.text.trim()}'
                               : selectedReason;
-
-                          // Dismiss late reason popup immediately!
-                          if (Navigator.of(dialogContext).canPop()) {
-                            Navigator.of(dialogContext).pop();
-                          }
 
                           final attendance = AttendanceModel(
                             attendanceId: ShiftEngineService().generateDeterministicAttendanceId(
@@ -1015,29 +898,75 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                             updatedAt: now,
                           );
 
-                          // 1. Save to SQLite offline DB (1-week local retention)
+                          // 1. Save to SQLite offline DB
                           await _offlineDb.insertAttendance(attendance);
 
                           // 2. Sync to Cloud Firestore
-                          FirebaseFirestore.instance
-                              .collection(AppConstants.colBusinesses)
-                              .doc(widget.businessId)
-                              .collection(AppConstants.colAttendance)
-                              .doc(attendance.attendanceId)
-                              .set(attendance.toMap())
-                              .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
-                              .catchError((err) => debugPrint('Cloud sync error: $err'));
+                          try {
+                            await FirebaseFirestore.instance
+                                .collection(AppConstants.colBusinesses)
+                                .doc(widget.businessId)
+                                .collection(AppConstants.colAttendance)
+                                .doc(attendance.attendanceId)
+                                .set(attendance.toMap());
+                            await _offlineDb.markAttendanceSynced(attendance.attendanceId);
+                          } catch (err) {
+                            debugPrint('Cloud sync queue notice: $err');
+                          }
 
-                          // 3. Send Automatic Email Alert via Gmail SMTP App Password
-                          EmailNotificationService().sendLateAttendanceAlertEmail(
-                            employeeName: name,
-                            employeeId: empId,
-                            shiftName: shiftResult.shiftName,
-                            lateMinutes: shiftResult.lateMinutes,
-                            lateReason: fullReason,
-                            shopId: widget.shopId,
-                            checkInTime: now,
-                          );
+                          // 3. Email Alert
+                          try {
+                            EmailNotificationService().sendLateAttendanceAlertEmail(
+                              employeeName: name,
+                              employeeId: empId,
+                              shiftName: shiftResult.shiftName,
+                              lateMinutes: shiftResult.lateMinutes,
+                              lateReason: fullReason,
+                              shopId: widget.shopId,
+                              checkInTime: now,
+                            );
+                          } catch (_) {}
+
+                          if (dialogCtx.mounted && Navigator.of(dialogCtx).canPop()) {
+                            Navigator.of(dialogCtx).pop();
+                          }
+
+                          if (mounted) {
+                            setState(() {
+                              _lastRecognizedEmployee = empData;
+                              _lastRecognizedName = name;
+                              _isAttendanceMarked = true;
+                              _noMatchFound = false;
+                              _scanFailureReason = null;
+                              _statusMessage = '⚠️ Late Check-In Submitted for Admin Approval (Late: ${shiftResult.lateMinutes}m)';
+                            });
+
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Row(
+                                  children: [
+                                    const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        '✓ Late reason submitted to Admin ($name)',
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                backgroundColor: AppColors.kesariSaffron,
+                                duration: const Duration(seconds: 4),
+                              ),
+                            );
+                          }
+
+                          await Future.delayed(const Duration(seconds: 4));
+                          if (mounted) {
+                            setState(() {
+                              _resetSessionLock();
+                            });
+                          }
                         },
                 ),
               ],
@@ -1046,15 +975,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         );
       },
     );
-
-    setState(() {
-      _lastRecognizedEmployee = empData;
-      _lastRecognizedName = name;
-      _isAttendanceMarked = true;
-      _noMatchFound = false;
-      _scanFailureReason = null;
-      _statusMessage = '⚠️ Late Check-In Submitted for Admin Approval (Late: ${shiftResult.lateMinutes}m)';
-    });
   }
 
   bool _isManualSyncing = false;
