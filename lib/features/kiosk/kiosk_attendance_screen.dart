@@ -72,6 +72,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   DateTime? _faceTrackStartTime;
   bool _hasSpokenBlinkPrompt = false;
   bool _isPhotoSpoofDetected = false;
+  bool _isAttendanceMarked = false;
 
   /// Production Switch: Enforce active eye blink & head micro-movement anti-spoofing
   bool requireLivenessForRecognition = true;
@@ -240,6 +241,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
               _faceTrackStartTime = null;
               _hasSpokenBlinkPrompt = false;
               _isPhotoSpoofDetected = false;
+              _isAttendanceMarked = false;
+              _lastRecognizedEmployee = null;
+              _lastRecognizedName = null;
+              _noMatchFound = false;
+              _scanFailureReason = null;
               _statusMessage = '👁️ Position face inside camera circle to scan';
             });
           }
@@ -258,7 +264,43 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         return;
       }
 
-      // Enforce Dual Liveness Verification (Eye Blink + Natural Head Micro-Movement)
+      // STEP A: Instant Face Recognition Preview (Confirms Database Connection & Displays Employee Info Card Immediately!)
+      if (_lastRecognizedEmployee == null && !_noMatchFound) {
+        final processRes = await _faceService.processFaceFromBytesDetailed(
+          bytes: bytes,
+          tempFilePath: xFile.path,
+          context: 'PREVIEW_MATCH',
+        );
+
+        if (processRes['success'] == true && processRes['embedding'] != null) {
+          final targetVector = processRes['embedding'] as List<double>;
+          final match = _faceService.matchFace(
+            targetEmbedding: targetVector,
+            enrolledEmployees: _enrolledStaffCache,
+          );
+
+          if (match != null) {
+            final String empName = match['employeeName'] ?? 'Employee';
+            if (mounted) {
+              setState(() {
+                _lastRecognizedEmployee = match['employeeData'];
+                _lastRecognizedName = empName;
+                _noMatchFound = false;
+                _scanFailureReason = null;
+              });
+            }
+          } else {
+            if (mounted) {
+              setState(() {
+                _noMatchFound = true;
+                _scanFailureReason = 'Unregistered Face • Database Connected (${_enrolledStaffCache.length} enrolled staff)';
+              });
+            }
+          }
+        }
+      }
+
+      // STEP B: Enforce Dual Liveness Verification (Eye Blink + Natural Head Micro-Movement)
       if (requireLivenessForRecognition) {
         // Face is detected & orientation is valid!
         _faceTrackStartTime ??= DateTime.now();
@@ -325,9 +367,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
               missingAction = 'Turn Head Slightly';
             }
 
+            final String personLabel = _lastRecognizedName != null ? 'Welcome $_lastRecognizedName!' : 'Face Detected';
+
             setState(() {
               _faceDetectedInFrame = true;
-              _statusMessage = '👀 Face Detected — $missingAction to verify! (Aankhein jhapkayen aur sar hilaayein)';
+              _statusMessage = '👀 $personLabel — $missingAction to log attendance!';
             });
           }
           return;
@@ -351,7 +395,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         });
       }
 
-      // Trigger attendance scan (Embedding -> Matching)
+      // Trigger attendance scan (Embedding -> Matching -> Save Attendance)
       await _processFaceScanWithFile(xFile.path, bytes);
     } catch (e) {
       debugPrint('Auto check frame error: $e');
@@ -667,6 +711,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           setState(() {
             _lastRecognizedEmployee = empData;
             _lastRecognizedName = name;
+            _isAttendanceMarked = true;
             _statusMessage = '✓ $name — Attendance Already Logged Today ($statusText)';
           });
         } else {
@@ -776,6 +821,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             setState(() {
               _lastRecognizedEmployee = empData;
               _lastRecognizedName = name;
+              _isAttendanceMarked = true;
               _noMatchFound = false;
               _scanFailureReason = null;
               _statusMessage = '✓ Welcome $name! ${shiftResult.statusLabel}.';
@@ -1004,6 +1050,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     setState(() {
       _lastRecognizedEmployee = empData;
       _lastRecognizedName = name;
+      _isAttendanceMarked = true;
       _noMatchFound = false;
       _scanFailureReason = null;
       _statusMessage = '⚠️ Late Check-In Submitted for Admin Approval (Late: ${shiftResult.lateMinutes}m)';
@@ -1353,10 +1400,27 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                             Chip(
-                              backgroundColor: AppColors.pannaEmerald.withValues(alpha: 0.2),
-                              side: const BorderSide(color: AppColors.pannaEmerald),
-                              avatar: const Icon(Icons.check_circle_rounded, size: 14, color: AppColors.pannaEmerald),
-                              label: const Text('PRESENT TODAY', style: TextStyle(fontSize: 11, color: AppColors.pannaEmerald, fontWeight: FontWeight.bold)),
+                              backgroundColor: _isAttendanceMarked
+                                  ? AppColors.pannaEmerald.withValues(alpha: 0.2)
+                                  : AppColors.haldiGold.withValues(alpha: 0.2),
+                              side: BorderSide(
+                                color: _isAttendanceMarked ? AppColors.pannaEmerald : AppColors.haldiGold,
+                              ),
+                              avatar: Icon(
+                                _isAttendanceMarked ? Icons.check_circle_rounded : Icons.remove_red_eye_rounded,
+                                size: 14,
+                                color: _isAttendanceMarked ? AppColors.pannaEmerald : AppColors.haldiGold,
+                              ),
+                              label: Text(
+                                _isAttendanceMarked
+                                    ? '✓ PRESENT TODAY • ATTENDANCE LOGGED'
+                                    : '👀 FACE IDENTIFIED • BLINK EYES TO LOG ATTENDANCE',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: _isAttendanceMarked ? AppColors.pannaEmerald : AppColors.haldiGold,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               padding: EdgeInsets.zero,
                               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
