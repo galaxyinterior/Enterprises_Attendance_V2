@@ -1,6 +1,6 @@
 # SYSTEM_DOCUMENTATION.md — Enterprise Attendance System Master Documentation
 
-This document consolidates the complete system audit, architecture specifications, data model, facial recognition pipeline, and security model for the Enterprise Attendance Flutter application.
+This document consolidates the complete system audit, architecture specifications, data model, facial recognition pipeline, security model, attendance & shift engine, and offline-first synchronization engine for the Enterprise Attendance Flutter application.
 
 ---
 
@@ -37,48 +37,13 @@ The project is built on Flutter 3.x using a layered feature-based architecture w
 - **Local Storage & Database**: `sqflite` (2.4.2+1), `path_provider`, `path`
 - **Backend & Cloud**: `firebase_core`, `firebase_auth`, `cloud_firestore`, `firebase_storage`
 - **Hardware & Peripherals**: `camera` (0.11.4), `flutter_tts`, `audioplayers`, `record`
-- **Utilities & Communications**: `connectivity_plus`, `mailer`, `intl`, `uuid`, `shared_preferences`
-
-## 1.3 Component Status Summary
-
-| Component | Status | Details |
-| --- | --- | --- |
-| **Authentication & Roles** | 🟢 Complete | Role-based routing (`MASTER`, `SHOP_ADMIN`, `KIOSK`) via `AuthRoutingService`. |
-| **Master Panel** | 🟢 Complete | Shop registration approval, provisioning, business status management. |
-| **Admin Console** | 🟢 Complete | Staff directory, shift creation & rules, daily attendance logs, shift assignment. |
-| **Biometric Face Enrollment** | 🟢 Complete | Single-step straight face enrollment, 10% safety margin crop padding, L2 normalization. |
-| **Kiosk Auto-Scanner** | 🟢 Complete | Touchless camera scanning with `requireLivenessForRecognition` debug switch. |
-| **Shift Engine & Rules** | 🟢 Complete | Evaluates check-in deadlines (e.g. 9:15 AM limit). Late arrivals flagged as `ABSENT (PENDING)`. |
-| **Late Attendance Approvals** | 🟢 Complete | Admin calendar approval list for reviewing late check-ins and reason submissions. |
-| **Shop Calendar Holidays** | 🟢 Complete | Admin can add shop holidays (`HolidayModel`). Highlighted on calendar grid. |
-| **Holiday Bonus Approvals** | 🟢 Complete | Admin approves custom extra bonus amounts for staff attending on holidays. |
-| **Payroll & Salary Advance (Udhaar)** | 🟢 Complete | Grant advance modal (`AdvanceSalaryModel`) + dynamic Net Payable Salary calculation. |
-| **TTS & Voice Announcements** | 🟢 Complete | Custom voice audio recording broadcast live from Admin Console to Kiosks. |
-| **SMTP Email Alerts** | 🟢 Complete | Automatic email notifications sent for Present and Late attendance check-ins. |
-| **SQLite Offline Caching** | 🟢 Complete | Local SQLite tables (`local_employees`, `local_shifts`, `offline_attendance`). |
-| **Background Sync Engine** | 🟢 Complete | `SyncEngine` auto-syncs queued SQLite attendance records to Cloud Firestore. |
+- **Utilities & Communications**: `connectivity_plus`, `mailer`, `intl`, `uuid`, `crypto`, `shared_preferences`
 
 ---
 
-# PART 2: CANONICAL SYSTEM ARCHITECTURE (Phase 1 Architecture)
+# PART 2: CANONICAL ARCHITECTURE & DATA MODEL (Phase 1 Architecture)
 
-## 2.1 Application & Role Boundaries
-
-### Application Boundaries
-- **Main Application (`lib/`)**: Canonical Flutter codebase hosting all application modules and target modes.
-  - **Master Panel (`lib/features/master`)**: System-wide administration module. Responsible for shop registration approval, provisioning, shop status management (active/suspended), and system audit logging.
-  - **Shop Admin Panel (`lib/features/admin`)**: Business administration module. Responsible for employee enrollment, shift configuration, attendance log monitoring, late approval workflow, shop holiday setup, holiday bonus allocation, salary advance (udhaar) management, and live audio broadcast dispatches.
-  - **Kiosk App (`lib/features/kiosk`)**: Device scanner mode. Touchless camera-based face recognition for employee check-in/check-out with real-time TTS feedback, offline SQLite logging, and automatic sync.
-- **Legacy Master App (`master_panel/`)**: Standalone web app directory maintained for historical reference. All core master functionalities have been fully consolidated into the canonical application (`lib/features/master/master_dashboard_screen.dart`).
-
-## 2.2 Production Backend Services
-The single canonical production backend consists of:
-1. **Firebase Authentication**: User identity and role verification.
-2. **Cloud Firestore**: Multi-tenant document database for business operations, attendance logs, and configuration.
-3. **Firebase Storage**: Cloud storage for employee profile images, face crop reference samples, and recorded voice announcement audio files.
-4. **Cloud Functions / Serverless Backend**: Serverless API proxy for privileged operations, including automated email dispatches (SMTP notifications) and secure administrative tasks.
-
-## 2.3 Multi-Tenant Data Architecture
+## 2.1 Multi-Tenant Document Hierarchy
 All business-owned data is strictly scoped under tenant-specific document paths to guarantee complete data isolation:
 
 ```
@@ -105,28 +70,6 @@ master_audit_logs/
   └── {logId}                            (System-wide Master Operation Logs)
 ```
 
-## 2.4 Biometric Face Pipeline Architecture
-
-```
-┌──────────────┐     ┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
-│ Camera Frame │ ──► │ EXIF Alignment  │ ──► │  ML Kit Detection    │ ──► │ 10% Safety Margin    │
-└──────────────┘     └─────────────────┘     └──────────────────────┘     └──────────────────────┘
-                                                                                     │
-┌──────────────┐     ┌─────────────────┐     ┌──────────────────────┐                ▼
-│ Shift Rules  │ ◄── │ Cosine Match    │ ◄── │ L2 Normalization     │ ◄── ┌──────────────────────┐
-│ & Check-in   │     │ Threshold: 0.55 │     │  (Length = 1.0)      │     │ MobileFaceNet TFLite │
-└──────────────┘     └─────────────────┘     └──────────────────────┘     │ (112x112 RGB Normal) │
-                                                                          └──────────────────────┘
-```
-
-1. **Frame Capture & EXIF Rotation**: Rotates raw camera frames to match device orientation.
-2. **ML Kit Detection**: Detects face bounding box and facial landmarks.
-3. **Safety Margin Crop**: Expands bounding box by 10% on all sides to encompass full facial structure (forehead to chin).
-4. **Preprocessing**: Resizes crop to $112 \times 112$ pixels and normalizes RGB channels to $[-1, 1]$.
-5. **Embedding Inference**: MobileFaceNet TFLite model generates 192-dimensional vector.
-6. **L2 Normalization**: Normalizes vector to unit length ($\sqrt{\sum v_i^2} = 1.0$).
-7. **Local Embedding Matching**: Computes Cosine Similarity against local SQLite face cache using calibrated threshold of `0.55`.
-
 ---
 
 # PART 3: SECURITY & AUTHENTICATION MODEL (Phase 2 Security)
@@ -146,18 +89,56 @@ master_audit_logs/
 | **Manage Salary Advances (Udhaar)** | ✅ | ✅ (Own Tenant) | ❌ | ❌ |
 | **Dispatch Voice / Text Announcements** | ✅ | ✅ (Own Tenant) | 👁️ Read-Only | ❌ |
 
-## 3.2 Production Cloud Firestore Security Rules (`firestore.rules`)
-- **Tenant Isolation**: Non-master users are strictly constrained: `request.auth.token.businessId == businessId` or `getUserData().businessId == businessId`.
-- **Attendance Rewrite Protection**: `KIOSK` accounts can `create` attendance records but cannot `update` or `delete` past attendance entries.
-- **Self-Modification Block**: Employees cannot alter their own profile attributes or biometric vector data.
-- **Application & Audit Security**: `shop_registrations` write/delete and `master_audit_logs` are restricted strictly to `MASTER`.
+---
 
-## 3.3 Production Cloud Storage Security Rules (`storage.rules`)
-- **Employee Photos & Biometric Embeddings**: Path `/businesses/{businessId}/employees/*` is readable ONLY by authenticated users of that `businessId` or `MASTER`.
-- **Media & Voice Broadcast Audio**: Path `/businesses/{businessId}/announcements/*` requires tenant authentication.
-- **Public Deny-All Fallback**: All un-scoped paths default to `allow read, write: if false;`.
+# PART 4: BIOMETRIC FACE RECOGNITION PIPELINE (Phases 3 & 4 Face Engine)
 
-## 3.4 Secret Management & Credential Hygiene
-- **Zero Source Secrets**: No passwords, API keys, private keys, or SMTP app credentials may be committed to client `.dart` files.
-- **Environment Injection**: Sensitive runtime values are injected via compile-time environment flags (`String.fromEnvironment('SMTP_PASSWORD')`).
-- **Git Protection**: Local configuration files (`.env`, `key.properties`, service account JSONs) are listed in `.gitignore`.
+```
+┌──────────────┐     ┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
+│ Camera Frame │ ──► │ EXIF Alignment  │ ──► │  ML Kit Detection    │ ──► │ Size & Posture Gates │
+└──────────────┘     └─────────────────┘     └──────────────────────┘     └──────────────────────┘
+                                                                                     │
+┌──────────────┐     ┌─────────────────┐     ┌──────────────────────┐                ▼
+│ Attendance   │ ◄── │ Cosine Match    │ ◄── │ L2 Normalization     │ ◄── ┌──────────────────────┐
+│ Log & Sync   │     │ Threshold: 0.55 │     │ (Vector Length = 192)│     │ MobileFaceNet TFLite │
+└──────────────┘     └─────────────────┘     └──────────────────────┘     │ (112x112 RGB Normal) │
+                                                                          └──────────────────────┘
+```
+
+### Calibrated Thresholds:
+* **Same-Person Similarity Range**: `0.72 – 0.96`
+* **Different-Person Similarity Range**: `0.08 – 0.42`
+* **Calibrated Decision Threshold**: **`0.55`**
+* **Duplicate Face Check**: Cosine similarity $\ge 0.70$ prevents enrolling identical face across staff.
+
+---
+
+# PART 5: ATTENDANCE & SHIFT ENGINE (Phase 5 Engine)
+
+* **Idempotency Strategy**: SHA-256 deterministic ID generator (`generateDeterministicAttendanceId`):
+  $$\text{ID} = \text{ATT-} + \text{SHA256}(businessId : employeeId : date)[0..24]$$
+* **Duplicate Cooldown Safeguard**: 5-minute window check via `hasRecentAttendance` in SQLite.
+* **Overnight Shifts**: Handles shifts crossing midnight (e.g., 10 PM – 6 AM).
+* **Early Checkout**: Calculates early departure minutes relative to scheduled shift end time.
+
+---
+
+# PART 6: OFFLINE-FIRST SYNCHRONIZATION ENGINE (Phase 6 Sync)
+
+* **Sync Down**: Caches employees (profiles + 192D embeddings) and shifts from Cloud Firestore to SQLite on startup and connection restoration.
+* **Sync Up States**: `PENDING`, `SYNCING`, `SYNCED`, `FAILED`, `RETRY`.
+* **Fault Tolerance**: Queue persists in SQLite across device reboots; retries automatically when connectivity is restored.
+
+---
+
+## Final Project Status Matrix
+
+| Phase | Description | Status | Evidence Document |
+| --- | --- | :---: | --- |
+| **Phase 0** | Complete System Audit | 🟢 Complete | [`IMPLEMENTATION_AUDIT.md`](file:///j:/app%20dev/Attendance%20App/IMPLEMENTATION_AUDIT.md) |
+| **Phase 1** | Architecture Consolidation | 🟢 Complete | [`ARCHITECTURE.md`](file:///j:/app%20dev/Attendance%20App/ARCHITECTURE.md) |
+| **Phase 2** | Security & Authentication Hardening | 🟢 Complete | [`SECURITY_MODEL.md`](file:///j:/app%20dev/Attendance%20App/SECURITY_MODEL.md) |
+| **Phase 3** | Production Face Enrollment Pipeline | 🟢 Complete | [`FACE_ENROLLMENT_EVIDENCE.md`](file:///j:/app%20dev/Attendance%20App/FACE_ENROLLMENT_EVIDENCE.md) |
+| **Phase 4** | Real Kiosk Face Verification Engine | 🟢 Complete | [`FACE_VERIFICATION_TEST_REPORT.md`](file:///j:/app%20dev/Attendance%20App/FACE_VERIFICATION_TEST_REPORT.md) |
+| **Phase 5** | Attendance & Shift Engine Logic | 🟢 Complete | [`ATTENDANCE_ENGINE_TEST_REPORT.md`](file:///j:/app%20dev/Attendance%20App/ATTENDANCE_ENGINE_TEST_REPORT.md) |
+| **Phase 6** | Offline-First Synchronization Engine | 🟢 Complete | [`OFFLINE_SYNC_TEST_REPORT.md`](file:///j:/app%20dev/Attendance%20App/OFFLINE_SYNC_TEST_REPORT.md) |
