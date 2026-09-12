@@ -16,9 +16,14 @@ class SyncEngine {
   Timer? _periodicSyncTimer;
   bool _isSyncing = false;
 
+  Timer? _shiftTickerTimer;
+  Timer? _hourlySyncTimer;
+
   void startAutoSync({String? activeBusinessId}) {
     _connectivitySubscription?.cancel();
     _periodicSyncTimer?.cancel();
+    _shiftTickerTimer?.cancel();
+    _hourlySyncTimer?.cancel();
 
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
       if (results.any((res) => res != ConnectivityResult.none)) {
@@ -29,11 +34,19 @@ class SyncEngine {
       }
     });
 
-    // Periodic background sync fallback every 30 seconds
-    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    // 1. Hourly background sync fallback every 1 hour to push pending data if found
+    _hourlySyncTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      debugPrint('⏰ Hourly Sync Triggered: Checking pending attendance records for Cloud Firestore...');
       syncPendingAttendance();
       if (activeBusinessId != null && activeBusinessId.isNotEmpty) {
         syncDownTenantData(activeBusinessId);
+      }
+    });
+
+    // 2. 1-Minute Ticker evaluating shift schedule (5 mins pre-shift sync down & shift deadline sync up)
+    _shiftTickerTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (activeBusinessId != null && activeBusinessId.isNotEmpty) {
+        evaluateShiftScheduleSync(activeBusinessId);
       }
     });
 
@@ -41,6 +54,68 @@ class SyncEngine {
     syncPendingAttendance();
     if (activeBusinessId != null && activeBusinessId.isNotEmpty) {
       syncDownTenantData(activeBusinessId);
+    }
+  }
+
+  /// Evaluates current shift schedules to trigger pre-shift sync down (5 min before start) and deadline sync up
+  Future<void> evaluateShiftScheduleSync(String businessId) async {
+    try {
+      final shifts = await _offlineDb.getLocalShifts(businessId);
+      if (shifts.isEmpty) return;
+
+      final now = DateTime.now();
+
+      for (var sMap in shifts) {
+        final startTimeStr = sMap['startTime'] as String? ?? '09:00 AM';
+        final maxCheckInTimeStr = sMap['maxCheckInTime'] as String? ?? '09:15 AM';
+
+        final DateTime? shiftStart = _parseTimeStringToday(startTimeStr, now);
+        final DateTime? shiftDeadline = _parseTimeStringToday(maxCheckInTimeStr, now);
+
+        if (shiftStart != null) {
+          final diffMinutes = shiftStart.difference(now).inMinutes;
+          // If within 5 minutes BEFORE shift start time (e.g. 9:55 AM for 10:00 AM shift)
+          if (diffMinutes >= 0 && diffMinutes <= 5) {
+            debugPrint('🕒 5-Minutes Pre-Shift Start Sync Triggered for Shift ${sMap['shiftName']}!');
+            await syncDownTenantData(businessId);
+          }
+        }
+
+        if (shiftDeadline != null) {
+          final diffMinutes = now.difference(shiftDeadline).inMinutes;
+          // If within 5 minutes AFTER check-in deadline (e.g. 10:15 AM to 10:20 AM for 10:15 AM deadline)
+          if (diffMinutes >= 0 && diffMinutes <= 5) {
+            debugPrint('🕒 Shift Check-in Deadline Sync Triggered for Shift ${sMap['shiftName']}!');
+            await syncPendingAttendance();
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error evaluating shift schedule sync: $e');
+    }
+  }
+
+  DateTime? _parseTimeStringToday(String timeStr, DateTime referenceDate) {
+    try {
+      final parts = timeStr.trim().split(' ');
+      if (parts.length < 2) return null;
+      final timeParts = parts[0].split(':');
+      int hour = int.parse(timeParts[0]);
+      final int minute = int.parse(timeParts[1]);
+      final String period = parts[1].toUpperCase();
+
+      if (period == 'PM' && hour < 12) hour += 12;
+      if (period == 'AM' && hour == 12) hour = 0;
+
+      return DateTime(
+        referenceDate.year,
+        referenceDate.month,
+        referenceDate.day,
+        hour,
+        minute,
+      );
+    } catch (_) {
+      return null;
     }
   }
 
@@ -165,5 +240,7 @@ class SyncEngine {
   void stopAutoSync() {
     _connectivitySubscription?.cancel();
     _periodicSyncTimer?.cancel();
+    _shiftTickerTimer?.cancel();
+    _hourlySyncTimer?.cancel();
   }
 }

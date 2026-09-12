@@ -36,7 +36,7 @@ class KioskAttendanceScreen extends StatefulWidget {
   State<KioskAttendanceScreen> createState() => _KioskAttendanceScreenState();
 }
 
-class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
+class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with WidgetsBindingObserver {
   final _faceService = FaceRecognitionService();
   final _voiceService = VoiceAnnouncementsService();
   final _offlineDb = OfflineDbService();
@@ -78,6 +78,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initServicesAndCamera();
     _listenToShopStatus();
     _listenToEnrolledStaff();
@@ -101,6 +102,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
       shopId: widget.shopId,
       deviceId: _deviceId,
     );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _autoScanTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _startAutoScanner();
+    }
   }
 
   void _listenToEnrolledStaff() {
@@ -405,6 +417,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _announcementsSub?.cancel();
     _autoScanTimer?.cancel();
     _hourlySyncTimer?.cancel();
