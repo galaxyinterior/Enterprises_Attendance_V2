@@ -21,6 +21,13 @@ import '../../models/attendance_model.dart';
 import '../../models/shift_model.dart';
 import '../auth/login_screen.dart';
 
+enum BlinkState {
+  waitingForOpen,
+  eyesOpen,
+  eyesClosed,
+  blinkConfirmed,
+}
+
 class KioskAttendanceScreen extends StatefulWidget {
   final String shopId;
   final String businessId;
@@ -70,6 +77,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   String? _lockedEmployeeName;
   DateTime? _sessionLockTime;
   bool _isFinalizingAttendance = false;
+
+  // Blink Liveness State Machine
+  BlinkState _blinkState = BlinkState.waitingForOpen;
+  int _openEyeFrameCount = 0;
 
   /// Production Switch: Enforce active eye blink & head micro-movement anti-spoofing
   bool requireLivenessForRecognition = true;
@@ -261,20 +272,30 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   }
 
   Future<void> _autoDetectFrame() async {
-    try {
-      if (_isProcessing ||
-          _isFinalizingAttendance ||
-          _isShopPaused ||
-          _cameraController == null ||
-          !_cameraController!.value.isInitialized ||
-          _cameraController!.value.isTakingPicture) {
-        return;
-      }
+    if (_isProcessing ||
+        _isFinalizingAttendance ||
+        _isShopPaused ||
+        _cameraController == null ||
+        !_cameraController!.value.isInitialized ||
+        _cameraController!.value.isTakingPicture) {
+      return;
+    }
 
-      // Check for session lock timeout (8 seconds max without blink)
+    _isProcessing = true;
+
+    try {
+      final String currentEmpId = _lockedEmployee != null ? (_lockedEmployee!['employeeId'] ?? 'N/A') : 'N/A';
+
+      // Check for session lock timeout (8 seconds max without valid blink)
       if (_lockedEmployee != null && _sessionLockTime != null) {
         final elapsed = DateTime.now().difference(_sessionLockTime!).inSeconds;
         if (elapsed > 8 && !_isAttendanceMarked && !_isFinalizingAttendance) {
+          debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+          debugPrint('state=TIMEOUT_NO_BLINK');
+          debugPrint('employeeId=$currentEmpId');
+          debugPrint('locked=true');
+          debugPrint('sessionAgeMs=${elapsed * 1000}');
+
           if (mounted) {
             setState(() {
               _resetSessionLock();
@@ -294,16 +315,34 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       }
       final bytes = await xFile.readAsBytes();
 
-      // Fast ML Kit Face & Blink Detection
+      // Fast ML Kit Face & Liveness Detection
       final res = await _faceService.detectFaceAndCheckBlink(xFile.path);
 
       if (res == null || res['hasFace'] != true) {
         if (_faceDetectedInFrame || _lockedEmployee != null || _noMatchFound) {
+          debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+          debugPrint('state=FACE_LOST');
+          debugPrint('employeeId=$currentEmpId');
+
           if (mounted && !_isAttendanceMarked && !_isFinalizingAttendance) {
             setState(() {
               _resetSessionLock();
             });
           }
+        }
+        return;
+      }
+
+      // Check single face requirement
+      final bool isSingleFace = res['isSingleFace'] as bool? ?? false;
+      if (!isSingleFace) {
+        debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+        debugPrint('state=MULTIPLE_FACES');
+        debugPrint('employeeId=$currentEmpId');
+        if (mounted) {
+          setState(() {
+            _statusMessage = '⚠️ Multiple faces detected! Please stand alone in camera view.';
+          });
         }
         return;
       }
@@ -319,31 +358,103 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         return;
       }
 
-      final bool isBlinkingNow = (res['isBlinking'] as bool? ?? false) ||
-          ((res['leftEyeOpen'] as double? ?? 1.0) < 0.60) ||
-          ((res['rightEyeOpen'] as double? ?? 1.0) < 0.60);
-
-      // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE
+      // =========================================================================
+      // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE (DO NOT RE-RUN MATCHING)
+      // =========================================================================
       if (_lockedEmployee != null) {
         final empName = _lockedEmployeeName ?? 'Employee';
+        final String empId = _lockedEmployee!['employeeId'] ?? 'N/A';
 
-        if (_isAttendanceMarked) {
-          // Attendance already logged, showing success screen
+        if (_isAttendanceMarked || _isFinalizingAttendance) {
           return;
         }
 
-        final lockElapsedMs = _sessionLockTime != null
+        final bool hasClassification = res['hasClassificationData'] as bool? ?? false;
+        final double? leftOpen = res['leftEyeOpen'] as double?;
+        final double? rightOpen = res['rightEyeOpen'] as double?;
+
+        if (!hasClassification || leftOpen == null || rightOpen == null) {
+          debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+          debugPrint('state=LIVENESS_DATA_UNAVAILABLE');
+          debugPrint('employeeId=$empId');
+          debugPrint('locked=true');
+          debugPrint('blinkState=${_blinkState.name}');
+          if (mounted) {
+            setState(() {
+              _faceDetectedInFrame = true;
+              _statusMessage = '👀 Welcome $empName! Look directly at camera to detect eyes.';
+            });
+          }
+          return;
+        }
+
+        final bool eyesAreOpen = (leftOpen >= 0.65 && rightOpen >= 0.65);
+        final bool eyesAreClosed = (leftOpen <= 0.35 && rightOpen <= 0.35);
+
+        // Blink Liveness State Machine Evaluation
+        switch (_blinkState) {
+          case BlinkState.waitingForOpen:
+            if (eyesAreOpen) {
+              _openEyeFrameCount++;
+              if (_openEyeFrameCount >= 1) {
+                _blinkState = BlinkState.eyesOpen;
+                debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+                debugPrint('state=TRANSITION');
+                debugPrint('employeeId=$empId');
+                debugPrint('blinkState=EYES_OPEN');
+              }
+            }
+            break;
+
+          case BlinkState.eyesOpen:
+            if (eyesAreClosed) {
+              _blinkState = BlinkState.eyesClosed;
+              debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+              debugPrint('state=TRANSITION');
+              debugPrint('employeeId=$empId');
+              debugPrint('blinkState=EYES_CLOSED');
+            }
+            break;
+
+          case BlinkState.eyesClosed:
+            if (eyesAreOpen) {
+              _blinkState = BlinkState.blinkConfirmed;
+              debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+              debugPrint('state=TRANSITION');
+              debugPrint('employeeId=$empId');
+              debugPrint('blinkState=BLINK_CONFIRMED');
+            }
+            break;
+
+          case BlinkState.blinkConfirmed:
+            break;
+        }
+
+        final sessionAgeMs = _sessionLockTime != null
             ? DateTime.now().difference(_sessionLockTime!).inMilliseconds
             : 0;
 
-        // When user blinks eyes OR after 1.5 seconds of session lock, mark attendance immediately!
-        if (isBlinkingNow || lockElapsedMs >= 1500) {
-          debugPrint('✨ EYE BLINK / AUTO VERIFY DETECTED FOR LOCKED EMPLOYEE ($empName)! FINALIZING ATTENDANCE...');
+        debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+        debugPrint('state=EVALUATING_LIVENESS');
+        debugPrint('employeeId=$empId');
+        debugPrint('faceDetected=true');
+        debugPrint('matched=true');
+        debugPrint('locked=true');
+        debugPrint('liveness=true');
+        debugPrint('blinkState=${_blinkState.name}');
+        debugPrint('isProcessing=$_isProcessing');
+        debugPrint('isFinalizingAttendance=$_isFinalizingAttendance');
+        debugPrint('sessionAgeMs=$sessionAgeMs');
+
+        if (_blinkState == BlinkState.blinkConfirmed) {
+          debugPrint('FINALIZE_TRIGGERED');
+          debugPrint('employeeId=$empId');
+          debugPrint('trigger=BLINK_CONFIRMED');
           await _finalizeAttendanceForLockedEmployee();
           return;
         }
 
-        // Still waiting for eye blink
+        // Still waiting for blink confirmation
         if (mounted) {
           setState(() {
             _faceDetectedInFrame = true;
@@ -353,96 +464,109 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         return;
       }
 
-      // CASE B: SESSION UNLOCKED — Perform fast face match to lock session!
-      if (!_noMatchFound && !_isProcessing) {
-        _isProcessing = true;
-        try {
-          final processRes = await _faceService.processFaceFromBytesDetailed(
-            bytes: bytes,
-            tempFilePath: xFile.path,
-            context: 'PREVIEW_MATCH',
+      // =========================================================================
+      // CASE B: SESSION UNLOCKED — PERFORM FACE MATCHING TO LOCK SESSION
+      // =========================================================================
+      if (!_noMatchFound) {
+        final processRes = await _faceService.processFaceFromBytesDetailed(
+          bytes: bytes,
+          tempFilePath: xFile.path,
+          context: 'PREVIEW_MATCH',
+        );
+
+        if (processRes['success'] == true && processRes['embedding'] != null) {
+          final targetVector = processRes['embedding'] as List<double>;
+          var match = _faceService.matchFace(
+            targetEmbedding: targetVector,
+            enrolledEmployees: _enrolledStaffCache,
           );
 
-          if (processRes['success'] == true && processRes['embedding'] != null) {
-            final targetVector = processRes['embedding'] as List<double>;
-            var match = _faceService.matchFace(
-              targetEmbedding: targetVector,
-              enrolledEmployees: _enrolledStaffCache,
-            );
+          // Cloud fallback search if local cache is empty
+          if (match == null && _enrolledStaffCache.isEmpty) {
+            try {
+              final snapshot = await FirebaseFirestore.instance
+                  .collection(AppConstants.colBusinesses)
+                  .doc(widget.businessId)
+                  .collection(AppConstants.colEmployees)
+                  .get()
+                  .timeout(const Duration(seconds: 3));
 
-            // Cloud fallback search if local cache is empty or no match
-            if (match == null && _enrolledStaffCache.isEmpty) {
-              try {
-                final snapshot = await FirebaseFirestore.instance
-                    .collection(AppConstants.colBusinesses)
-                    .doc(widget.businessId)
-                    .collection(AppConstants.colEmployees)
-                    .get()
-                    .timeout(const Duration(seconds: 3));
+              final cloudEmps = snapshot.docs
+                  .map((doc) => doc.data())
+                  .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+                  .toList();
 
-                final cloudEmps = snapshot.docs
-                    .map((doc) => doc.data())
-                    .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
-                    .toList();
+              if (cloudEmps.isNotEmpty) {
+                await _offlineDb.saveLocalEmployees(cloudEmps, businessId: widget.businessId);
+                _enrolledStaffCache = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+                match = _faceService.matchFace(
+                  targetEmbedding: targetVector,
+                  enrolledEmployees: _enrolledStaffCache,
+                );
+              }
+            } catch (_) {}
+          }
 
-                if (cloudEmps.isNotEmpty) {
-                  await _offlineDb.saveLocalEmployees(cloudEmps, businessId: widget.businessId);
-                  _enrolledStaffCache = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
-                  match = _faceService.matchFace(
-                    targetEmbedding: targetVector,
-                    enrolledEmployees: _enrolledStaffCache,
-                  );
-                }
-              } catch (_) {}
+          if (match != null) {
+            final String empName = match['employeeName'];
+            final empData = match['employeeData'] ?? {};
+            final String empId = match['employeeId'] ?? 'N/A';
+
+            if (mounted) {
+              setState(() {
+                _lockedEmployee = match;
+                _lockedEmployeeName = empName;
+                _lastRecognizedEmployee = empData;
+                _lastRecognizedName = empName;
+                _sessionLockTime = DateTime.now();
+                _blinkState = BlinkState.waitingForOpen;
+                _openEyeFrameCount = 0;
+                _isAttendanceMarked = false;
+                _noMatchFound = false;
+                _scanFailureReason = null;
+                _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to log attendance!';
+              });
+
+              debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+              debugPrint('state=EMPLOYEE_LOCKED');
+              debugPrint('employeeId=$empId');
+              debugPrint('faceDetected=true');
+              debugPrint('matched=true');
+              debugPrint('locked=true');
+              debugPrint('blinkState=WAITING_FOR_OPEN');
             }
 
-            if (match != null) {
-              final String empName = match['employeeName'];
-              final empData = match['employeeData'] ?? {};
+            try {
+              _voiceService.speakLivenessPrompt();
+            } catch (_) {}
+            return;
+          } else {
+            if (mounted) {
+              setState(() {
+                _noMatchFound = true;
+                _scanFailureReason = 'Unregistered Face • Database Connected (${_enrolledStaffCache.length} enrolled staff)';
+                _statusMessage = '❌ Unregistered Face — Auto-resetting in 3s...';
+              });
 
-              if (mounted) {
-                setState(() {
-                  _lockedEmployee = match;
-                  _lockedEmployeeName = empName;
-                  _lastRecognizedEmployee = empData;
-                  _lastRecognizedName = empName;
-                  _sessionLockTime = DateTime.now();
-                  _isAttendanceMarked = false;
-                  _noMatchFound = false;
-                  _scanFailureReason = null;
-                  _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to log attendance!';
-                });
-              }
+              debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
+              debugPrint('state=UNREGISTERED_FACE');
+              debugPrint('matched=false');
 
-              try {
-                _voiceService.speakLivenessPrompt();
-              } catch (_) {}
-              return;
-            } else {
-              if (mounted) {
-                setState(() {
-                  _noMatchFound = true;
-                  _scanFailureReason = 'Unregistered Face • Database Connected (${_enrolledStaffCache.length} enrolled staff)';
-                  _statusMessage = '❌ Unregistered Face — Auto-resetting in 3s...';
-                });
-
-                // Auto reset _noMatchFound after 3 seconds so new faces can scan!
-                Timer(const Duration(seconds: 3), () {
-                  if (mounted && _noMatchFound) {
-                    setState(() {
-                      _resetSessionLock();
-                    });
-                  }
-                });
-              }
+              Timer(const Duration(seconds: 3), () {
+                if (mounted && _noMatchFound) {
+                  setState(() {
+                    _resetSessionLock();
+                  });
+                }
+              });
             }
           }
-        } finally {
-          _isProcessing = false;
         }
       }
     } catch (e) {
       debugPrint('Auto detect frame exception: $e');
+    } finally {
+      _isProcessing = false;
     }
   }
 
@@ -450,13 +574,16 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     if (_isFinalizingAttendance || _lockedEmployee == null) return;
     _isFinalizingAttendance = true;
 
-    try {
-      final match = _lockedEmployee!;
-      final String empId = match['employeeId'];
-      final String name = match['employeeName'];
-      final double confidence = match['confidence'] ?? 0.95;
-      final Map<String, dynamic> empData = match['employeeData'] ?? {};
+    final match = _lockedEmployee!;
+    final String empId = match['employeeId'];
+    final String name = match['employeeName'];
+    final double confidence = match['confidence'] ?? 0.95;
+    final Map<String, dynamic> empData = match['employeeData'] ?? {};
 
+    debugPrint('FINALIZE_STARTED');
+    debugPrint('employeeId=$empId');
+
+    try {
       final now = DateTime.now();
       final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
@@ -466,6 +593,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
       if (todayRecord != null || isRecentDuplicate) {
         final String statusText = todayRecord != null ? (todayRecord['status'] ?? 'LOGGED') : 'LOGGED';
+        debugPrint('ATTENDANCE_DUPLICATE_SKIPPED employeeId=$empId status=$statusText');
         try {
           await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
         } catch (_) {}
@@ -495,6 +623,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           assignedShiftId: empShiftName,
           customShift: matchedShift,
         );
+
+        debugPrint('SHIFT_RESULT');
+        debugPrint('status=${shiftResult.status}');
+        debugPrint('isPastDeadline=${shiftResult.isPastDeadline}');
+        debugPrint('shiftName=${shiftResult.shiftName}');
+        debugPrint('lateMinutes=${shiftResult.lateMinutes}');
 
         bool isHolidayWork = false;
         try {
@@ -544,9 +678,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             updatedAt: now,
           );
 
+          debugPrint('SQLITE_ATTENDANCE_INSERT_START');
+          debugPrint('attendanceId=${attendance.attendanceId}');
+          debugPrint('status=${attendance.status}');
+
           // 1. Save SQLite
           await _offlineDb.insertAttendance(attendance);
 
+          debugPrint('SQLITE_ATTENDANCE_INSERT_SUCCESS');
+          debugPrint('attendanceId=${attendance.attendanceId}');
+
+          debugPrint('FIRESTORE_ATTENDANCE_WRITE_START');
           // 2. Sync Firestore
           try {
             FirebaseFirestore.instance
@@ -555,8 +697,14 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                 .collection(AppConstants.colAttendance)
                 .doc(attendance.attendanceId)
                 .set(attendance.toMap())
-                .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
-                .catchError((err) => debugPrint('Background cloud sync queued: $err'));
+                .then((_) {
+                  debugPrint('FIRESTORE_ATTENDANCE_WRITE_SUCCESS');
+                  _offlineDb.markAttendanceSynced(attendance.attendanceId);
+                })
+                .catchError((err) {
+                  debugPrint('Background cloud sync queued: $err');
+                  return null;
+                });
           } catch (err) {
             debugPrint('Background cloud sync notice: $err');
           }
@@ -576,6 +724,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           try {
             await _voiceService.speakCheckInGreeting(name);
           } catch (_) {}
+
+          debugPrint('ATTENDANCE_SUCCESS');
+          debugPrint('employeeId=$empId');
+          debugPrint('status=${attendance.status}');
 
           if (mounted) {
             setState(() {

@@ -77,21 +77,31 @@ class FaceRecognitionService {
     try {
       final inputImage = InputImage.fromFilePath(imagePath);
       final faces = await detectFaces(inputImage);
-      if (faces.isEmpty) return null;
+      if (faces.isEmpty) {
+        return {
+          'hasFace': false,
+          'faceCount': 0,
+          'isSingleFace': false,
+        };
+      }
 
       final face = faces.first;
-      final leftOpen = face.leftEyeOpenProbability ?? 1.0;
-      final rightOpen = face.rightEyeOpenProbability ?? 1.0;
+      final double? leftOpen = face.leftEyeOpenProbability;
+      final double? rightOpen = face.rightEyeOpenProbability;
+      final bool hasClassificationData = (leftOpen != null && rightOpen != null);
+      final bool faceCountIsOne = (faces.length == 1);
 
-      // Eye blink transition: either eye openness drops below 0.60
-      bool isBlinking = (leftOpen < 0.60 || rightOpen < 0.60);
-      bool isFullyOpen = (leftOpen > 0.70 && rightOpen > 0.70);
+      bool isBlinking = hasClassificationData && (leftOpen < 0.35 || rightOpen < 0.35);
+      bool isFullyOpen = hasClassificationData && (leftOpen > 0.70 && rightOpen > 0.70);
       bool isLive = isLiveFaceValid(face);
 
       return {
         'face': face,
         'hasFace': true,
+        'faceCount': faces.length,
+        'isSingleFace': faceCountIsOne,
         'isLiveValid': isLive,
+        'hasClassificationData': hasClassificationData,
         'leftEyeOpen': leftOpen,
         'rightEyeOpen': rightOpen,
         'isBlinking': isBlinking,
