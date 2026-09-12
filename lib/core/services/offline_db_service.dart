@@ -256,11 +256,18 @@ class OfflineDbService {
   // Get all cached local employees for 100% offline face recognition
   Future<List<Map<String, dynamic>>> getLocalEmployeesWithEmbeddings(String businessId) async {
     final db = await database;
-    final List<Map<String, dynamic>> rows = await db.query(
-      'local_employees',
-      where: 'businessId = ?',
-      whereArgs: [businessId],
-    );
+    List<Map<String, dynamic>> rows = [];
+    if (businessId.isNotEmpty) {
+      rows = await db.query(
+        'local_employees',
+        where: 'businessId = ?',
+        whereArgs: [businessId],
+      );
+    }
+    // Fallback: If no records found for specified businessId, fetch all local employees
+    if (rows.isEmpty) {
+      rows = await db.query('local_employees');
+    }
 
     List<Map<String, dynamic>> result = [];
     for (var row in rows) {

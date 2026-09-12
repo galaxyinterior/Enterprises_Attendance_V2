@@ -569,7 +569,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
       final int facesCount = res['facesDetected'] as int? ?? 0;
       if (facesCount > 1) {
-        await _voiceService.speakAlert('Only one person should stand in front of the kiosk.');
+        try {
+          await _voiceService.speakAlert('Only one person should stand in front of the kiosk.');
+        } catch (_) {}
         setState(() {
           _lastRecognizedEmployee = null;
           _lastRecognizedName = null;
@@ -602,7 +604,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       if (match == null) {
         debugPrint('❌ Face vector not found in Local RAM Cache (${_enrolledStaffCache.length} cached). Searching Cloud Firebase Database...');
         setState(() {
-          _statusMessage = '☁️ Face not in Local DB — Searching Cloud Database...';
+          _statusMessage = '☁️ Searching Cloud Database...';
         });
 
         try {
@@ -659,7 +661,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
         if (todayRecord != null || isRecentDuplicate) {
           final String statusText = todayRecord != null ? (todayRecord['status'] ?? 'LOGGED') : 'LOGGED';
-          await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
+          try {
+            await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
+          } catch (_) {}
           setState(() {
             _lastRecognizedEmployee = empData;
             _lastRecognizedName = name;
@@ -693,7 +697,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                 .doc(widget.businessId)
                 .collection('holidays')
                 .where('date', isEqualTo: dateStr)
-                .get();
+                .get()
+                .timeout(const Duration(seconds: 2));
             if (holSnap.docs.isNotEmpty) {
               isHolidayWork = true;
             }
@@ -737,26 +742,36 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             await _offlineDb.insertAttendance(attendance);
 
             // 2. Queue Cloud Firestore sync asynchronously in background
-            FirebaseFirestore.instance
-                .collection(AppConstants.colBusinesses)
-                .doc(widget.businessId)
-                .collection(AppConstants.colAttendance)
-                .doc(attendance.attendanceId)
-                .set(attendance.toMap())
-                .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
-                .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
+            try {
+              FirebaseFirestore.instance
+                  .collection(AppConstants.colBusinesses)
+                  .doc(widget.businessId)
+                  .collection(AppConstants.colAttendance)
+                  .doc(attendance.attendanceId)
+                  .set(attendance.toMap())
+                  .then((_) => _offlineDb.markAttendanceSynced(attendance.attendanceId))
+                  .catchError((err) => debugPrint('Background cloud sync queued for offline retry: $err'));
+            } catch (err) {
+              debugPrint('Background cloud sync queue notice: $err');
+            }
 
             // 3. Send Automatic Email Alert via Gmail SMTP
-            EmailNotificationService().sendPresentAttendanceEmail(
-              employeeName: name,
-              employeeId: empId,
-              shiftName: shiftResult.shiftName,
-              shopId: widget.shopId,
-              checkInTime: now,
-            );
+            try {
+              EmailNotificationService().sendPresentAttendanceEmail(
+                employeeName: name,
+                employeeId: empId,
+                shiftName: shiftResult.shiftName,
+                shopId: widget.shopId,
+                checkInTime: now,
+              );
+            } catch (err) {
+              debugPrint('Background email alert notice: $err');
+            }
 
             // Speak personalized voice greeting
-            await _voiceService.speakCheckInGreeting(name);
+            try {
+              await _voiceService.speakCheckInGreeting(name);
+            } catch (_) {}
 
             setState(() {
               _lastRecognizedEmployee = empData;
@@ -768,9 +783,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           }
         }
       } else {
-        await _voiceService.speakAlert('Face not recognized. Please try again.');
+        try {
+          await _voiceService.speakAlert('Face not recognized. Please try again.');
+        } catch (_) {}
         final String reason = _enrolledStaffCache.isEmpty
-            ? 'No enrolled staff records found in system database.'
+            ? 'No enrolled staff records found in local DB. Please add employees in Admin.'
             : 'Unregistered face (No match found in ${_enrolledStaffCache.length} enrolled staff)';
         setState(() {
           _lastRecognizedEmployee = null;
@@ -780,14 +797,15 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           _statusMessage = '❌ Face Not Recognized — No Match Found';
         });
       }
-    } catch (e) {
-      debugPrint('Error in kiosk auto scan: $e');
+    } catch (e, stack) {
+      debugPrint('Error in kiosk auto scan: $e\n$stack');
       setState(() {
-        _statusMessage = 'Error scanning face. Retrying...';
+        _statusMessage = '⚠️ Please position face clearly inside camera circle';
       });
     } finally {
-      // Display success message for 5 seconds before resetting UI scanner view
-      await Future.delayed(const Duration(seconds: 5));
+      // Display success welcome message for 5 seconds; for failed/unregistered scans, reset in 1.5s for fast seamless retries
+      final int delaySeconds = (_lastRecognizedName != null) ? 5 : 2;
+      await Future.delayed(Duration(seconds: delaySeconds));
       if (mounted) {
         setState(() {
           _isProcessing = false;
