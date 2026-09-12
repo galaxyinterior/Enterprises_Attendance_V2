@@ -55,12 +55,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   bool _isShopPaused = false;
   final String _deviceId = 'KSK-01';
 
+  StreamSubscription<QuerySnapshot>? _announcementsSub;
+  Map<String, dynamic>? _activeAnnouncementData;
+  final Set<String> _spokenAnnouncementIds = {};
+
   @override
   void initState() {
     super.initState();
     _initServicesAndCamera();
     _listenToShopStatus();
     _listenToEnrolledStaff();
+    _listenToAnnouncements();
     SyncEngine().startAutoSync();
     _heartbeatService.startHeartbeat(
       businessId: widget.businessId,
@@ -237,13 +242,138 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     });
   }
 
+  void _listenToAnnouncements() {
+    _announcementsSub = FirebaseFirestore.instance
+        .collection(AppConstants.colBusinesses)
+        .doc(widget.businessId)
+        .collection(AppConstants.colAnnouncements)
+        .where('active', isEqualTo: true)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.docs.isNotEmpty) {
+        final docs = List<QueryDocumentSnapshot>.from(snapshot.docs);
+        docs.sort((a, b) {
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final aTime = (aData['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+          final bTime = (bData['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+          return bTime.compareTo(aTime);
+        });
+
+        final activeDoc = docs.first;
+        final data = activeDoc.data() as Map<String, dynamic>;
+        final docId = activeDoc.id;
+        final message = data['message'] as String? ?? '';
+        final type = data['type'] as String? ?? 'general';
+
+        if (mounted) {
+          setState(() {
+            _activeAnnouncementData = data;
+          });
+        }
+
+        if (!_spokenAnnouncementIds.contains(docId) && message.isNotEmpty) {
+          _spokenAnnouncementIds.add(docId);
+          if (type == 'emergency') {
+            _voiceService.speakEmergencyAlert(message);
+          } else {
+            _voiceService.speakAlert("Attention: $message");
+          }
+        }
+      } else {
+        if (mounted && _activeAnnouncementData != null) {
+          setState(() {
+            _activeAnnouncementData = null;
+          });
+        }
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _announcementsSub?.cancel();
     _autoScanTimer?.cancel();
     SyncEngine().stopAutoSync();
     _heartbeatService.stopHeartbeat();
     _cameraController?.dispose();
     super.dispose();
+  }
+
+  Widget _buildAnnouncementBanner() {
+    if (_activeAnnouncementData == null) return const SizedBox.shrink();
+    final message = _activeAnnouncementData!['message'] as String? ?? '';
+    final type = _activeAnnouncementData!['type'] as String? ?? 'general';
+    final isEmergency = type == 'emergency';
+    final isNotice = type == 'notice';
+
+    Color bgColor = isEmergency
+        ? AppColors.sindoorRed
+        : (isNotice ? AppColors.kesariSaffron : AppColors.mayurBlue);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: bgColor.withValues(alpha: 0.5),
+            blurRadius: 12,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: const BoxDecoration(
+              color: Colors.white24,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isEmergency ? Icons.warning_amber_rounded : Icons.campaign_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  isEmergency
+                      ? '🚨 EMERGENCY ALERT BROADCAST'
+                      : (isNotice ? '📢 ANNOUNCEMENT NOTICE' : 'ℹ️ INFORMATION BROADCAST'),
+                  style: GoogleFonts.outfit(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // Trigger Real Face Scan & Recognition from live camera frame
@@ -691,6 +821,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                   _businessName.isNotEmpty ? _businessName.toUpperCase() : 'SHOP KIOSK: ${widget.shopId}',
                   style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                 ),
+                _buildAnnouncementBanner(),
                 const SizedBox(height: 8),
                 Text(
                   _isShopPaused ? '⚠️ SERVICE TEMPORARILY PAUSED BY MASTER ADMIN' : 'REAL-TIME BIOMETRIC ENTRANCE KIOSK',

@@ -30,13 +30,77 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _selectedNavIndex = 0;
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
+  final TextEditingController _announcementCtrl = TextEditingController();
+  String _selectedAnnouncementType = 'emergency'; // 'emergency', 'notice', 'info'
+  bool _isBroadcastingAnnouncement = false;
   DateTime _selectedLogDate = DateTime.now();
   String _selectedStatusFilter = 'ALL';
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _announcementCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _broadcastAnnouncement() async {
+    final message = _announcementCtrl.text.trim();
+    if (message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter an announcement message.'),
+          backgroundColor: AppColors.sindoorRed,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isBroadcastingAnnouncement = true;
+    });
+
+    try {
+      final docRef = FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .collection(AppConstants.colAnnouncements)
+          .doc();
+
+      await docRef.set({
+        'id': docRef.id,
+        'message': message,
+        'type': _selectedAnnouncementType,
+        'createdAt': FieldValue.serverTimestamp(),
+        'active': true,
+        'shopId': widget.shopId,
+      });
+
+      _announcementCtrl.clear();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🎉 Announcement broadcasted live to Kiosk devices!'),
+            backgroundColor: AppColors.pannaEmerald,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error broadcasting announcement: $e'),
+            backgroundColor: AppColors.sindoorRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBroadcastingAnnouncement = false;
+        });
+      }
+    }
   }
 
   @override
@@ -874,44 +938,320 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildAnnouncementsTab() {
-    final textCtrl = TextEditingController();
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Broadcast Voice Announcement / Alert', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-          const SizedBox(height: 16),
-          TextField(
-            controller: textCtrl,
-            style: const TextStyle(color: AppColors.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'Enter message to broadcast on Entrance Kiosk device...',
-              hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-              filled: true,
-              fillColor: AppColors.inputBgDark,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.cardBorderDark),
+          Row(
+            children: [
+              const Icon(Icons.campaign_rounded, color: AppColors.kesariSaffron, size: 28),
+              const SizedBox(width: 10),
+              Text(
+                'Broadcast Voice Announcement / Alert',
+                style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.cardBorderDark),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.kesariSaffron),
-              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Broadcast real-time voice & visual alert banner to Entrance Kiosk devices across the shop.',
+            style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 20),
+
+          // Broadcast Card
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.cardDark,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.cardBorderDark),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '1. Select Announcement Severity / Category:',
+                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('🚨 Emergency Alert'),
+                      selected: _selectedAnnouncementType == 'emergency',
+                      selectedColor: AppColors.sindoorRed,
+                      backgroundColor: AppColors.inputBgDark,
+                      labelStyle: TextStyle(
+                        color: _selectedAnnouncementType == 'emergency' ? Colors.white : AppColors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      onSelected: (val) {
+                        if (val) setState(() => _selectedAnnouncementType = 'emergency');
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('📢 Notice / Shift Alert'),
+                      selected: _selectedAnnouncementType == 'notice',
+                      selectedColor: AppColors.kesariSaffron,
+                      backgroundColor: AppColors.inputBgDark,
+                      labelStyle: TextStyle(
+                        color: _selectedAnnouncementType == 'notice' ? Colors.white : AppColors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      onSelected: (val) {
+                        if (val) setState(() => _selectedAnnouncementType = 'notice');
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('ℹ️ General Info'),
+                      selected: _selectedAnnouncementType == 'info',
+                      selectedColor: AppColors.mayurBlue,
+                      backgroundColor: AppColors.inputBgDark,
+                      labelStyle: TextStyle(
+                        color: _selectedAnnouncementType == 'info' ? Colors.white : AppColors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      onSelected: (val) {
+                        if (val) setState(() => _selectedAnnouncementType = 'info');
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '2. Announcement Message:',
+                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _announcementCtrl,
+                  maxLines: 3,
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    hintText: 'Enter message to speak on Kiosk speaker & display on screen...',
+                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    filled: true,
+                    fillColor: AppColors.inputBgDark,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.cardBorderDark),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.cardBorderDark),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.kesariSaffron),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _selectedAnnouncementType == 'emergency'
+                          ? AppColors.sindoorRed
+                          : (_selectedAnnouncementType == 'notice' ? AppColors.kesariSaffron : AppColors.mayurBlue),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: _isBroadcastingAnnouncement
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.volume_up_rounded, color: Colors.white),
+                    label: Text(
+                      _isBroadcastingAnnouncement ? 'BROADCASTING...' : 'BROADCAST ANNOUNCEMENT LIVE NOW',
+                      style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                    onPressed: _isBroadcastingAnnouncement ? null : _broadcastAnnouncement,
+                  ),
+                ),
+              ],
             ),
           ),
+
+          const SizedBox(height: 28),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Active & Recent Broadcasts',
+                style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+              ),
+              const Icon(Icons.history_rounded, color: AppColors.textMuted, size: 20),
+            ],
+          ),
           const SizedBox(height: 12),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
-            icon: const Icon(Icons.campaign, color: Colors.white),
-            label: const Text('BROADCAST EMERGENCY ALERT NOW', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Emergency alert broadcasted to Kiosk device!')),
+
+          // Broadcasts Stream List
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection(AppConstants.colBusinesses)
+                .doc(widget.businessId)
+                .collection(AppConstants.colAnnouncements)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: AppColors.kesariSaffron)));
+              }
+
+              final docs = snapshot.data?.docs ?? [];
+              if (docs.isEmpty) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: AppColors.cardDark,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.cardBorderDark),
+                  ),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.speaker_notes_off_rounded, color: AppColors.textMuted, size: 36),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No announcements broadcasted yet.',
+                        style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              // Sort by createdAt descending locally
+              final sortedDocs = List<QueryDocumentSnapshot>.from(docs);
+              sortedDocs.sort((a, b) {
+                final aData = a.data() as Map<String, dynamic>;
+                final bData = b.data() as Map<String, dynamic>;
+                final aTime = (aData['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+                final bTime = (bData['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+                return bTime.compareTo(aTime);
+              });
+
+              return ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: sortedDocs.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final doc = sortedDocs[index];
+                  final data = doc.data() as Map<String, dynamic>;
+                  final message = data['message'] as String? ?? '';
+                  final type = data['type'] as String? ?? 'general';
+                  final isActive = data['active'] as bool? ?? false;
+                  final timestamp = (data['createdAt'] as Timestamp?)?.toDate();
+                  final timeStr = timestamp != null ? DateFormat('dd MMM, hh:mm a').format(timestamp) : 'Just now';
+
+                  Color badgeColor = AppColors.mayurBlue;
+                  IconData badgeIcon = Icons.info_outline;
+                  String badgeTitle = 'INFO';
+                  if (type == 'emergency') {
+                    badgeColor = AppColors.sindoorRed;
+                    badgeIcon = Icons.warning_amber_rounded;
+                    badgeTitle = 'EMERGENCY';
+                  } else if (type == 'notice') {
+                    badgeColor = AppColors.kesariSaffron;
+                    badgeIcon = Icons.campaign_rounded;
+                    badgeTitle = 'NOTICE';
+                  }
+
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardDark,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isActive ? badgeColor.withValues(alpha: 0.6) : AppColors.cardBorderDark,
+                        width: isActive ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: badgeColor.withValues(alpha: 0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(badgeIcon, color: badgeColor, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: badgeColor,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      badgeTitle,
+                                      style: GoogleFonts.inter(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: isActive ? AppColors.pannaEmerald.withValues(alpha: 0.2) : Colors.grey.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      isActive ? '● LIVE ON KIOSK' : 'DISMISSED',
+                                      style: GoogleFonts.inter(
+                                        color: isActive ? AppColors.pannaEmerald : Colors.grey,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(timeStr, style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 11)),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                message,
+                                style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w500),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: Icon(
+                            isActive ? Icons.stop_circle_outlined : Icons.delete_outline_rounded,
+                            color: isActive ? AppColors.sindoorRed : AppColors.textMuted,
+                            size: 22,
+                          ),
+                          tooltip: isActive ? 'Dismiss Announcement' : 'Delete Record',
+                          onPressed: () async {
+                            if (isActive) {
+                              await doc.reference.update({'active': false});
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Announcement dismissed from Kiosk.')),
+                                );
+                              }
+                            } else {
+                              await doc.reference.delete();
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  );
+                },
               );
             },
           ),
