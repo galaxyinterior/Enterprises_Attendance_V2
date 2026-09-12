@@ -1,6 +1,6 @@
 # SYSTEM_DOCUMENTATION.md — Enterprise Attendance System Master Documentation
 
-This document consolidates the complete system audit, architecture specifications, data model, facial recognition pipeline, security model, attendance & shift engine, and offline-first synchronization engine for the Enterprise Attendance Flutter application.
+This document consolidates the complete system audit, architecture specifications, data model, facial recognition pipeline, security model, attendance & shift engine, offline-first synchronization engine, and master panel trusted provisioning system for the Enterprise Attendance Flutter application.
 
 ---
 
@@ -131,9 +131,19 @@ master_audit_logs/
 
 ---
 
+# PART 7: MASTER PANEL & TRUSTED PROVISIONING (Phase 7 Master)
+
+* **Registration Review & Retention**: Approved and rejected application requests are retained with status (`APPROVED` / `REJECTED`), documented rejection reason, `reviewedAt`, and `reviewedBy = 'MASTER'`.
+* **Provisioning State Machine**: Tracks state transition (`NOT_STARTED` $\rightarrow$ `IN_PROGRESS` $\rightarrow$ `COMPLETED` / `PARTIAL_FAILURE` / `FAILED`).
+* **Shop Status Control**: Controls shop operational mode (`active`, `paused`, `suspended`). Paused status blocks kiosk attendance scanning while retaining offline database state.
+* **Device Terminal Binding**: Manages kiosk terminal bindings (`businesses/{businessId}/devices/{deviceId}`) and supports revocation/unpairing (`UNPAIRED`).
+* **Master Audit Trail**: Immutable logging to `master_audit_logs` for provisioning, status updates, rejection decisions, and device unpairing actions.
+
+---
+
 ## Final Project Status Matrix
 
-| Phase | Description | Status | Evidence Document |
+| Phase | Description | Status | Reference Artifact |
 | --- | --- | :---: | --- |
 | **Phase 0** | Complete System Audit | 🟢 Complete | [`IMPLEMENTATION_AUDIT.md`](file:///j:/app%20dev/Attendance%20App/IMPLEMENTATION_AUDIT.md) |
 | **Phase 1** | Architecture Consolidation | 🟢 Complete | [`ARCHITECTURE.md`](file:///j:/app%20dev/Attendance%20App/ARCHITECTURE.md) |
@@ -142,3 +152,4 @@ master_audit_logs/
 | **Phase 4** | Real Kiosk Face Verification Engine | 🟢 Complete | [`FACE_VERIFICATION_TEST_REPORT.md`](file:///j:/app%20dev/Attendance%20App/FACE_VERIFICATION_TEST_REPORT.md) |
 | **Phase 5** | Attendance & Shift Engine Logic | 🟢 Complete | [`ATTENDANCE_ENGINE_TEST_REPORT.md`](file:///j:/app%20dev/Attendance%20App/ATTENDANCE_ENGINE_TEST_REPORT.md) |
 | **Phase 6** | Offline-First Synchronization Engine | 🟢 Complete | [`OFFLINE_SYNC_TEST_REPORT.md`](file:///j:/app%20dev/Attendance%20App/OFFLINE_SYNC_TEST_REPORT.md) |
+| **Phase 7** | Master Panel & Trusted Provisioning | 🟢 Complete | [`MASTER_PROVISIONING_TEST_REPORT.md`](file:///j:/app%20dev/Attendance%20App/MASTER_PROVISIONING_TEST_REPORT.md) |
