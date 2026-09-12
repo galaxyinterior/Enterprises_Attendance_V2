@@ -47,6 +47,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   bool _isCameraInitialized = false;
 
   Timer? _autoScanTimer;
+  Timer? _hourlySyncTimer;
   bool _isProcessing = false;
   bool _faceDetectedInFrame = false;
 
@@ -81,6 +82,19 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
     _listenToShopStatus();
     _listenToEnrolledStaff();
     _listenToAnnouncements();
+
+    // 1. Maintain 1-week attendance history in local SQLite DB
+    _offlineDb.deleteAttendanceOlderThan(days: 7);
+
+    // 2. Setup 1-hour periodic timer for local DB maintenance & cloud sync
+    _hourlySyncTimer = Timer.periodic(const Duration(hours: 1), (_) async {
+      await _offlineDb.deleteAttendanceOlderThan(days: 7);
+      await SyncEngine().syncPendingAttendance();
+      if (mounted && widget.businessId.isNotEmpty) {
+        await SyncEngine().syncDownTenantData(widget.businessId);
+      }
+    });
+
     SyncEngine().startAutoSync(activeBusinessId: widget.businessId);
     _heartbeatService.startHeartbeat(
       businessId: widget.businessId,
@@ -393,6 +407,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
   void dispose() {
     _announcementsSub?.cancel();
     _autoScanTimer?.cancel();
+    _hourlySyncTimer?.cancel();
     SyncEngine().stopAutoSync();
     _heartbeatService.stopHeartbeat();
     _cameraController?.dispose();
@@ -592,14 +607,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         final now = DateTime.now();
         final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
-        // Check for 5-minute duplicate attendance safeguard
-        final isDuplicate = await _offlineDb.hasRecentAttendance(empId, dateStr);
-        if (isDuplicate) {
-          await _voiceService.speakAlert('$name, your attendance was already logged recently.');
+        // Check for 1-week local SQLite attendance history safeguard
+        final todayRecord = await _offlineDb.getTodayAttendanceRecord(empId, dateStr);
+        final isRecentDuplicate = await _offlineDb.hasRecentAttendance(empId, dateStr);
+
+        if (todayRecord != null || isRecentDuplicate) {
+          final String statusText = todayRecord != null ? (todayRecord['status'] ?? 'LOGGED') : 'LOGGED';
+          await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
           setState(() {
             _lastRecognizedEmployee = empData;
             _lastRecognizedName = name;
-            _statusMessage = '$name — Attendance Already Logged Recently';
+            _statusMessage = '✓ $name — Attendance Already Logged Today ($statusText)';
           });
         } else {
           // Phase 4: Evaluate assigned shift schedule & attendance status
@@ -722,7 +740,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
         _statusMessage = 'Error scanning face. Retrying...';
       });
     } finally {
-      await Future.delayed(const Duration(milliseconds: 3500));
+      // Display success message for 5 seconds before resetting UI scanner view
+      await Future.delayed(const Duration(seconds: 5));
       if (mounted) {
         setState(() {
           _isProcessing = false;
@@ -760,7 +779,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
       barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (dialogContext, setDialogState) {
             return AlertDialog(
               backgroundColor: AppColors.cardDark,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -857,6 +876,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                               ? '$selectedReason — ${customReasonCtrl.text.trim()}'
                               : selectedReason;
 
+                          // Dismiss late reason popup immediately!
+                          if (Navigator.of(dialogContext).canPop()) {
+                            Navigator.of(dialogContext).pop();
+                          }
+
                           final attendance = AttendanceModel(
                             attendanceId: ShiftEngineService().generateDeterministicAttendanceId(
                               businessId: widget.businessId,
@@ -881,7 +905,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                             updatedAt: now,
                           );
 
-                          // 1. Save to SQLite offline DB
+                          // 1. Save to SQLite offline DB (1-week local retention)
                           await _offlineDb.insertAttendance(attendance);
 
                           // 2. Sync to Cloud Firestore
@@ -904,8 +928,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> {
                             shopId: widget.shopId,
                             checkInTime: now,
                           );
-
-                          if (ctx.mounted) Navigator.pop(ctx);
                         },
                 ),
               ],

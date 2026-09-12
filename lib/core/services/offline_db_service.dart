@@ -149,6 +149,34 @@ class OfflineDbService {
     }
   }
 
+  /// Clean up local attendance records older than [days] (Default: 7 days / 1 week)
+  Future<int> deleteAttendanceOlderThan({int days = 7}) async {
+    final db = await database;
+    final cutoff = DateTime.now().subtract(Duration(days: days));
+    final cutoffStr = cutoff.toIso8601String();
+    return await db.delete(
+      'offline_attendance',
+      where: 'createdAt < ?',
+      whereArgs: [cutoffStr],
+    );
+  }
+
+  /// Retrieves today's attendance record for an employee from local SQLite
+  Future<Map<String, dynamic>?> getTodayAttendanceRecord(String employeeId, String date) async {
+    final db = await database;
+    final List<Map<String, dynamic>> records = await db.query(
+      'offline_attendance',
+      where: 'employeeId = ? AND date = ?',
+      whereArgs: [employeeId, date],
+      orderBy: 'checkInTime DESC',
+      limit: 1,
+    );
+    if (records.isNotEmpty) {
+      return records.first;
+    }
+    return null;
+  }
+
   // Get all pending unsynced attendance records (including RETRY & FAILED)
   Future<List<AttendanceModel>> getPendingAttendance() async {
     final db = await database;
