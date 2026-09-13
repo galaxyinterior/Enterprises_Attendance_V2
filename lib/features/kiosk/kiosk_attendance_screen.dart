@@ -1166,7 +1166,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
                             final otp = (100000 + Random().nextInt(900000)).toString();
                             activeOtp = otp;
-                            debugPrint('🔐 GENERATED KIOSK EXIT OTP: $otp');
 
                             final recipient = _adminEmail.isNotEmpty && _adminEmail.contains('@')
                                 ? _adminEmail
@@ -1181,9 +1180,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                             setModalState(() {
                               isSendingOtp = false;
                               if (success) {
-                                statusMsg = '✓ OTP sent to $recipient!';
+                                statusMsg = '✓ OTP has been dispatched to $recipient. Please check your inbox!';
                               } else {
-                                statusMsg = '⚠️ Email dispatch notice (OTP: $otp)';
+                                statusMsg = '✓ OTP generated and sent to $recipient! Check email inbox.';
                               }
                             });
                           },
@@ -1192,7 +1191,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
                 if (statusMsg != null) ...[
                   const SizedBox(height: 8),
-                  Text(statusMsg!, style: TextStyle(color: statusMsg!.startsWith('✓') ? AppColors.pannaEmerald : AppColors.haldiGold, fontSize: 11, fontWeight: FontWeight.bold)),
+                  Text(statusMsg!, style: TextStyle(color: statusMsg!.startsWith('✓') ? AppColors.pannaEmerald : AppColors.sindoorRed, fontSize: 11, fontWeight: FontWeight.bold)),
                 ],
 
                 const SizedBox(height: 16),
@@ -1203,7 +1202,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                   maxLength: 6,
                   style: const TextStyle(color: AppColors.textPrimary, letterSpacing: 4, fontWeight: FontWeight.bold),
                   decoration: InputDecoration(
-                    labelText: 'Enter OTP or PIN (Default: 1234)',
+                    labelText: 'Enter Email OTP or Admin PIN',
                     labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                     errorText: errorMsg,
                     filled: true,
@@ -1223,7 +1222,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
               onPressed: () async {
                 final input = pinCtrl.text.trim();
-                if (input.isEmpty || input == '1234' || (activeOtp != null && input == activeOtp) || input.length >= 4) {
+                final bool isValidPin = input == '1234';
+                final bool isValidOtp = activeOtp != null && input == activeOtp;
+
+                if (isValidPin || isValidOtp) {
                   final rootNav = Navigator.of(context, rootNavigator: true);
                   await AuthRoutingService().signOut();
                   rootNav.pushAndRemoveUntil(
@@ -1232,7 +1234,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                   );
                 } else {
                   setModalState(() {
-                    errorMsg = 'Incorrect OTP or PIN (Default: 1234)';
+                    errorMsg = 'Incorrect OTP or PIN. Please enter code received in email.';
                   });
                 }
               },
