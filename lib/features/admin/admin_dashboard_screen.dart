@@ -76,6 +76,143 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
+  void _showKioskLanguageSettingsDialog() async {
+    String currentLang = 'en-IN';
+    
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .get();
+      if (doc.exists && doc.data() != null) {
+        currentLang = doc.data()!['ttsLanguage'] ?? 'en-IN';
+      }
+    } catch (_) {}
+
+    final languages = [
+      {'code': 'en-IN', 'name': 'English (India) 🇮🇳', 'sub': 'Default Indian Accent'},
+      {'code': 'hi-IN', 'name': 'Hindi (हिन्दी) 🇮🇳', 'sub': 'Hindi Greetings & Prompts'},
+      {'code': 'en-US', 'name': 'English (United States) 🇺🇸', 'sub': 'American Accent'},
+      {'code': 'mr-IN', 'name': 'Marathi (मराठी) 🇮🇳', 'sub': 'Marathi TTS Support'},
+      {'code': 'bn-IN', 'name': 'Bengali (বাংলা) 🇮🇳', 'sub': 'Bengali TTS Support'},
+      {'code': 'ta-IN', 'name': 'Tamil (தமிழ்) 🇮🇳', 'sub': 'Tamil TTS Support'},
+      {'code': 'te-IN', 'name': 'Telugu (తెలుగు) 🇮🇳', 'sub': 'Telugu TTS Support'},
+      {'code': 'gu-IN', 'name': 'Gujarati (ગુજરાતી) 🇮🇳', 'sub': 'Gujarati TTS Support'},
+      {'code': 'kn-IN', 'name': 'Kannada (ಕನ್ನಡ) 🇮🇳', 'sub': 'Kannada TTS Support'},
+    ];
+
+    String selectedCode = currentLang;
+    bool isSaving = false;
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          backgroundColor: AppColors.cardDark,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: AppColors.cardBorderDark),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.record_voice_over_rounded, color: AppColors.kesariSaffron, size: 24),
+              const SizedBox(width: 10),
+              Text('Kiosk Voice TTS Language', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Select the TTS voice language for Kiosk attendance greetings & announcements:',
+                  style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13),
+                ),
+                const SizedBox(height: 14),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: languages.length,
+                    separatorBuilder: (_, index) => const Divider(color: AppColors.cardBorderDark, height: 1),
+                    itemBuilder: (ctx, index) {
+                      final item = languages[index];
+                      final isSelected = selectedCode == item['code'];
+                      return ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        onTap: () => setModalState(() => selectedCode = item['code']!),
+                        leading: Container(
+                          width: 20,
+                          height: 20,
+                          margin: const EdgeInsets.only(top: 2),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected ? AppColors.kesariSaffron : AppColors.textMuted,
+                              width: isSelected ? 6 : 2,
+                            ),
+                          ),
+                        ),
+                        title: Text(item['name']!, style: TextStyle(color: isSelected ? AppColors.kesariSaffron : AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+                        subtitle: Text(item['sub']!, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.kesariSaffron),
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      setModalState(() => isSaving = true);
+                      final messenger = ScaffoldMessenger.of(context);
+                      try {
+                        final langObj = languages.firstWhere((l) => l['code'] == selectedCode);
+                        await FirebaseFirestore.instance
+                            .collection(AppConstants.colBusinesses)
+                            .doc(widget.businessId)
+                            .set({
+                          'ttsLanguage': selectedCode,
+                          'ttsLanguageName': langObj['name'],
+                        }, SetOptions(merge: true));
+
+                        if (dialogCtx.mounted) {
+                          Navigator.of(dialogCtx).pop();
+                        }
+
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('✓ Kiosk TTS Language updated to ${langObj['name']}!'),
+                            backgroundColor: AppColors.pannaEmerald,
+                          ),
+                        );
+                      } catch (e) {
+                        setModalState(() => isSaving = false);
+                      }
+                    },
+              child: isSaving
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('SAVE & APPLY TO KIOSK', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -181,6 +318,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Kiosk Voice TTS Language Settings',
+            icon: const Icon(Icons.record_voice_over_rounded, color: AppColors.haldiGold),
+            onPressed: _showKioskLanguageSettingsDialog,
+          ),
           IconButton(
             tooltip: 'Manual Cloud Sync (2-Way)',
             icon: _isAdminSyncing

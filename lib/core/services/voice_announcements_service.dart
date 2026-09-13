@@ -7,12 +7,13 @@ class VoiceAnnouncementsService {
 
   late FlutterTts _flutterTts;
   bool _isInitialized = false;
+  String _currentLanguage = "en-IN";
 
   Future<void> initialize() async {
     if (_isInitialized) return;
     _flutterTts = FlutterTts();
 
-    await _flutterTts.setLanguage("en-IN"); // Indian English accent default
+    await _flutterTts.setLanguage(_currentLanguage);
     await _flutterTts.setVolume(1.0); // Maximum volume for clarity
     await _flutterTts.setPitch(1.0);
     await _flutterTts.setSpeechRate(0.5); // Clear, natural speed
@@ -20,12 +21,29 @@ class VoiceAnnouncementsService {
     _isInitialized = true;
   }
 
+  Future<void> setLanguage(String langCode) async {
+    await initialize();
+    _currentLanguage = langCode;
+    try {
+      await _flutterTts.setLanguage(langCode);
+    } catch (_) {}
+  }
+
+  String get currentLanguage => _currentLanguage;
+
   // Speak personalized check-in greeting
   Future<void> speakCheckInGreeting(String employeeName) async {
     await initialize();
     await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
-    String message = "$employeeName, Good Morning. Your attendance has been marked successfully.";
+    await _flutterTts.setLanguage(_currentLanguage);
+
+    String message;
+    if (_currentLanguage == "hi-IN") {
+      message = "$employeeName ji, Namaskar. Aapki haaziri safaltapoorvak darj ho gayi hai.";
+    } else {
+      message = "$employeeName, Good Morning. Your attendance has been marked successfully.";
+    }
     await _flutterTts.speak(message);
   }
 
@@ -34,7 +52,14 @@ class VoiceAnnouncementsService {
     await initialize();
     await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
-    String message = "$employeeName, Thank you. Your checkout has been recorded.";
+    await _flutterTts.setLanguage(_currentLanguage);
+
+    String message;
+    if (_currentLanguage == "hi-IN") {
+      message = "$employeeName ji, Dhanyavaad. Aapka checkout darj ho gaya hai.";
+    } else {
+      message = "$employeeName, Thank you. Your checkout has been recorded.";
+    }
     await _flutterTts.speak(message);
   }
 
@@ -43,7 +68,14 @@ class VoiceAnnouncementsService {
     await initialize();
     await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
-    String message = "$employeeName, Attendance marked. You are late today.";
+    await _flutterTts.setLanguage(_currentLanguage);
+
+    String message;
+    if (_currentLanguage == "hi-IN") {
+      message = "$employeeName ji, Haaziri darj ho gayi hai. Aap aaj late hain.";
+    } else {
+      message = "$employeeName, Attendance marked. You are late today.";
+    }
     await _flutterTts.speak(message);
   }
 
@@ -52,14 +84,19 @@ class VoiceAnnouncementsService {
     await initialize();
     await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
-    await _flutterTts.speak("Please blink your eyes to verify attendance.");
+    await _flutterTts.setLanguage(_currentLanguage);
+
+    String message;
+    if (_currentLanguage == "hi-IN") {
+      message = "Kripya apni palakein jhapakayein.";
+    } else {
+      message = "Please blink your eyes to verify attendance.";
+    }
+    await _flutterTts.speak(message);
   }
 
   Future<void> speakLivenessPrompt() async {
-    await initialize();
-    await _flutterTts.stop();
-    await _flutterTts.setVolume(1.0);
-    await _flutterTts.speak("Please blink your eyes to verify attendance.");
+    await speakBlinkPrompt();
   }
 
   // Speak window closed or shift mismatch alert
@@ -67,6 +104,7 @@ class VoiceAnnouncementsService {
     await initialize();
     await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
+    await _flutterTts.setLanguage(_currentLanguage);
     await _flutterTts.speak(alertText);
   }
 
@@ -75,6 +113,7 @@ class VoiceAnnouncementsService {
     await initialize();
     await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
+    await _flutterTts.setLanguage(_currentLanguage);
     await _flutterTts.setSpeechRate(0.55);
     await _flutterTts.speak("Emergency Announcement! $emergencyMessage");
   }
@@ -84,6 +123,7 @@ class VoiceAnnouncementsService {
     await initialize();
     await _flutterTts.stop();
     await _flutterTts.setVolume(1.0);
+    await _flutterTts.setLanguage(_currentLanguage);
     await _flutterTts.setSpeechRate(0.5);
 
     String prefix = "Attention please!";

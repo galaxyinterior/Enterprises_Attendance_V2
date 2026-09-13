@@ -630,12 +630,14 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         final status = data['status'] ?? '';
         final name = data['businessName'] ?? data['shopName'] ?? widget.shopId;
         final adminEmail = data['ownerEmail'] ?? data['email'] ?? data['adminEmail'] ?? '${widget.shopId}@admin.com';
+        final ttsLang = data['ttsLanguage'] as String? ?? 'en-IN';
         if (mounted) {
           setState(() {
             _isShopPaused = status == AppConstants.statusPaused;
             _businessName = name.toString();
             _adminEmail = adminEmail.toString();
           });
+          _voiceService.setLanguage(ttsLang);
         }
       }
     });
