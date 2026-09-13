@@ -179,6 +179,78 @@ class VoiceAnnouncementsService {
     await speakBlinkPrompt();
   }
 
+  // Speak Already Recorded Alert
+  Future<void> speakAlreadyRecorded(String employeeName) async {
+    await initialize();
+    await _flutterTts.stop();
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setLanguage(_currentLanguage);
+
+    String message;
+    switch (_currentLanguage) {
+      case "hi-IN":
+        message = "$employeeName जी, आपकी आज की हाज़िरी पहले ही दर्ज हो चुकी है।";
+        break;
+      case "mr-IN":
+        message = "$employeeName जी, तुमची आजची उपस्थिती आधीच नोंदवली गेली आहे.";
+        break;
+      case "gu-IN":
+        message = "$employeeName જી, તમારી આજની હાજરી પહેલેથી જ નોંધાઈ ચૂકી છે.";
+        break;
+      case "bn-IN":
+        message = "$employeeName জি, আপনার আজকের উপস্থিতি ইতিমধ্যেই রেকর্ড করা হয়েছে।";
+        break;
+      case "ta-IN":
+        message = "$employeeName, இன்றைய உங்களின் வருகை ஏற்கனவே பதிவாகிவிட்டது.";
+        break;
+      case "te-IN":
+        message = "$employeeName, మీ இன்றைய హాజరు ఇప్పటికే నమోదైంది.";
+        break;
+      case "kn-IN":
+        message = "$employeeName, ನಿಮ್ಮ ಇಂದಿನ ಹಾಜರಾತಿ ಈಗಾಗಲೇ ದಾಖಲಾಗಿದೆ.";
+        break;
+      default:
+        message = "$employeeName, your attendance for today is already recorded.";
+    }
+    await _flutterTts.speak(message);
+  }
+
+  // Speak Late Reason Selection Prompt
+  Future<void> speakLateReasonPrompt(String employeeName) async {
+    await initialize();
+    await _flutterTts.stop();
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setLanguage(_currentLanguage);
+
+    String message;
+    switch (_currentLanguage) {
+      case "hi-IN":
+        message = "$employeeName जी, आप आज लेट हैं। कृपया देर से आने का कारण चुनें।";
+        break;
+      case "mr-IN":
+        message = "$employeeName जी, तुम्ही आज उशिरा आला आहात. कृपया उशीर होण्याचे कारण निवडा.";
+        break;
+      case "gu-IN":
+        message = "$employeeName જી, તમે આજે મોડા આવ્યા છો. કૃપા કરીને મોડા આવવાનું કારણ પસંદ કરો.";
+        break;
+      case "bn-IN":
+        message = "$employeeName জি, আপনি আজ দেরিতে এসেছেন। অনুগ্রহ করে দেরির কারণ বাছুন।";
+        break;
+      case "ta-IN":
+        message = "$employeeName, இன்று தாமதமாக வந்துள்ளீர்கள். தாமதத்திற்கான காரணத்தை தேர்ந்தெடுக்கவும்.";
+        break;
+      case "te-IN":
+        message = "$employeeName, మీరు ఈరోజు ఆలస్యంగా వచ్చారు. ఆలస్యానికి కారణం ఎంచుకోండి.";
+        break;
+      case "kn-IN":
+        message = "$employeeName, ನೀವು ಇಂದು ತಡವಾಗಿ ಬಂದಿದ್ದೀರಿ. ದಯವಿಟ್ಟು ತಡವಾಗಲು ಕಾರಣವನ್ನು ಆಯ್ಕೆಮಾಡಿ.";
+        break;
+      default:
+        message = "$employeeName, you are late today. Please select a reason.";
+    }
+    await _flutterTts.speak(message);
+  }
+
   // Speak window closed or shift mismatch alert
   Future<void> speakAlert(String alertText) async {
     await initialize();

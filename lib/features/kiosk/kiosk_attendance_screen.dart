@@ -462,7 +462,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       if (isDuplicate) {
         debugPrint('ATTENDANCE_DUPLICATE_SKIPPED employeeId=$empId status=$statusText');
         try {
-          await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
+          await _voiceService.speakAlreadyRecorded(name);
         } catch (_) {}
         if (mounted) {
           setState(() {
@@ -826,7 +826,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     bool isHolidayWork = false,
   }) async {
     try {
-      await _voiceService.speakAlert('$name, you are late for attendance. Please select reason.');
+      await _voiceService.speakLateReasonPrompt(name);
     } catch (_) {}
 
     String selectedReason = 'Traffic Jam';
