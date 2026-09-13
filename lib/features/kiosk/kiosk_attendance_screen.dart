@@ -1383,12 +1383,14 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                         size: 22,
                       ),
                       const SizedBox(width: 10),
-                      Text(
-                        _statusMessage,
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          color: _lastRecognizedName != null ? AppColors.pannaEmerald : AppColors.textPrimary,
-                          fontWeight: FontWeight.w600,
+                      Flexible(
+                        child: Text(
+                          _statusMessage,
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            color: _lastRecognizedName != null ? AppColors.pannaEmerald : AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -1424,19 +1426,21 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                               child: Icon(Icons.person_rounded, color: Colors.white, size: 26),
                             ),
                             const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _lastRecognizedEmployee?['fullName'] ?? _lastRecognizedName ?? 'Employee',
-                                  style: GoogleFonts.outfit(fontSize: 19, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Emp Code: ${_lastRecognizedEmployee?['empCode'] ?? _lastRecognizedEmployee?['employeeId'] ?? 'EMP-01'}  •  Phone: ${_lastRecognizedEmployee?['phone'] ?? _lastRecognizedEmployee?['phoneNumber'] ?? 'N/A'}',
-                                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.haldiGold, fontWeight: FontWeight.w600),
-                                ),
-                              ],
+                            Flexible(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _lastRecognizedEmployee?['fullName'] ?? _lastRecognizedName ?? 'Employee',
+                                    style: GoogleFonts.outfit(fontSize: 19, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Emp Code: ${_lastRecognizedEmployee?['empCode'] ?? _lastRecognizedEmployee?['employeeId'] ?? 'EMP-01'}  •  Phone: ${_lastRecognizedEmployee?['phone'] ?? _lastRecognizedEmployee?['phoneNumber'] ?? 'N/A'}',
+                                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.haldiGold, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
@@ -1525,19 +1529,21 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                               child: Icon(Icons.person_off_rounded, color: Colors.white, size: 26),
                             ),
                             const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'NO MATCH / DATA FOUND',
-                                  style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.sindoorRed),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _scanFailureReason ?? 'Unregistered Face • Attendance Not Marked',
-                                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.haldiGold, fontWeight: FontWeight.w600),
-                                ),
-                              ],
+                            Flexible(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'NO MATCH / DATA FOUND',
+                                    style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.sindoorRed),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _scanFailureReason ?? 'Unregistered Face • Attendance Not Marked',
+                                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.haldiGold, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
@@ -1574,9 +1580,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           // Top Right Manual Sync NOW & Exit Lock Action Bar
           Positioned(
             top: 40,
+            left: 20,
             right: 20,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
@@ -1598,7 +1607,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                   ),
                   onPressed: _isManualSyncing ? null : _triggerManualSync,
                 ),
-                const SizedBox(width: 8),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.cardDark,
@@ -1613,7 +1621,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                   ),
                   onPressed: _resetCamera,
                 ),
-                const SizedBox(width: 8),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.sindoorRed.withValues(alpha: 0.8),
