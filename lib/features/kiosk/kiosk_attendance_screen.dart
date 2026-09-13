@@ -11,7 +11,6 @@ import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/face_recognition_service.dart';
 import '../../core/services/voice_announcements_service.dart';
-import '../../core/services/offline_db_service.dart';
 import '../../core/services/kiosk_heartbeat_service.dart';
 import '../../core/services/auth_routing_service.dart';
 import '../../core/services/shift_engine_service.dart';
@@ -38,7 +37,6 @@ class KioskAttendanceScreen extends StatefulWidget {
 class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with WidgetsBindingObserver {
   final _faceService = FaceRecognitionService();
   final _voiceService = VoiceAnnouncementsService();
-  final _offlineDb = OfflineDbService();
   final _heartbeatService = KioskHeartbeatService();
 
   CameraController? _cameraController;
@@ -46,7 +44,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   bool _isCameraInitialized = false;
 
   Timer? _autoScanTimer;
-  Timer? _hourlySyncTimer;
   bool _isProcessing = false;
   bool _faceDetectedInFrame = false;
 
@@ -65,9 +62,10 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
   bool _isAttendanceMarked = false;
 
-  // Session Lock State for Instant Face Match & Attendance Logging
+  // Session Lock State & Eye Blink Liveness Verification
   Map<String, dynamic>? _lockedEmployee;
   bool _isFinalizingAttendance = false;
+  bool _hasEyesOpenedBefore = false;
 
   /// Production Switch: Enforce active eye blink & head micro-movement anti-spoofing
   bool requireLivenessForRecognition = true;
@@ -81,19 +79,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     _listenToEnrolledStaff();
     _listenToAnnouncements();
 
-    // 1. Maintain 1-week attendance history in local SQLite DB
-    _offlineDb.deleteAttendanceOlderThan(days: 7);
-
-    // 2. Setup 1-hour periodic timer for local DB maintenance & cloud sync
-    _hourlySyncTimer = Timer.periodic(const Duration(hours: 1), (_) async {
-      await _offlineDb.deleteAttendanceOlderThan(days: 7);
-      await SyncEngine().syncPendingAttendance();
-      if (mounted && widget.businessId.isNotEmpty) {
-        await SyncEngine().syncDownTenantData(widget.businessId);
-      }
-    });
-
-    SyncEngine().startAutoSync(activeBusinessId: widget.businessId);
     _heartbeatService.startHeartbeat(
       businessId: widget.businessId,
       shopId: widget.shopId,
@@ -113,50 +98,37 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   }
 
   void _listenToEnrolledStaff() {
-    // 1. Initial load from local SQLite database for 100% offline availability
-    _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId).then((localEmps) {
-      _logCacheDiagnostics(localEmps);
-      if (mounted && localEmps.isNotEmpty) {
-        setState(() {
-          _enrolledStaffCache = localEmps;
-        });
-      }
-    });
-
-    // 2. Real-time sync from Cloud Firestore to Local SQLite database
     try {
       FirebaseFirestore.instance
           .collection(AppConstants.colBusinesses)
           .doc(widget.businessId)
           .collection(AppConstants.colEmployees)
           .snapshots()
-          .listen((snapshot) async {
+          .listen((snapshot) {
         final enrolled = snapshot.docs
             .map((doc) => doc.data())
             .where((emp) => (emp['active'] ?? true) == true && emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
             .toList();
 
-        await _offlineDb.saveLocalEmployees(enrolled, businessId: widget.businessId);
-        final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
-        _logCacheDiagnostics(updatedLocal);
+        _logCacheDiagnostics(enrolled);
 
         if (mounted) {
           setState(() {
-            _enrolledStaffCache = updatedLocal;
+            _enrolledStaffCache = enrolled;
           });
         }
       }, onError: (err) {
-        debugPrint('Firestore real-time sync offline notice: $err. Operating via SQLite local cache.');
+        debugPrint('Firestore real-time staff sync notice: $err');
       });
     } catch (e) {
-      debugPrint('Firestore stream init exception: $e. Operating via SQLite local cache.');
+      debugPrint('Firestore stream init exception: $e');
     }
   }
 
   void _logCacheDiagnostics(List<Map<String, dynamic>> emps) {
     int withEmbedding = emps.where((e) => e['faceEmbedding'] != null && (e['faceEmbedding'] as List).isNotEmpty).length;
     int dim = withEmbedding > 0 ? (emps.first['faceEmbedding'] as List).length : 0;
-    debugPrint('=== LOCAL_FACE_CACHE_DIAGNOSTICS ===');
+    debugPrint('=== CLOUD_FACE_CACHE_DIAGNOSTICS ===');
     debugPrint('businessId=${widget.businessId}');
     debugPrint('employeesLoaded=${emps.length}');
     debugPrint('employeesWithEmbedding=$withEmbedding');
@@ -199,6 +171,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     _lockedEmployee = null;
     _isProcessing = false;
     _isFinalizingAttendance = false;
+    _hasEyesOpenedBefore = false;
     _faceDetectedInFrame = false;
     _lastRecognizedName = null;
     _lastRecognizedEmployee = null;
@@ -247,7 +220,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           _isProcessing ||
           _isFinalizingAttendance ||
           _isAttendanceMarked ||
-          _lockedEmployee != null ||
           _isShopPaused ||
           _cameraController == null ||
           !_cameraController!.value.isInitialized ||
@@ -262,7 +234,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     if (_isProcessing ||
         _isFinalizingAttendance ||
         _isAttendanceMarked ||
-        _lockedEmployee != null ||
         _isShopPaused ||
         _cameraController == null ||
         !_cameraController!.value.isInitialized ||
@@ -314,13 +285,38 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       }
 
       // =========================================================================
-      // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE (DO NOT RE-RUN MATCHING)
+      // CASE A: SESSION IS LOCKED TO A MATCHED EMPLOYEE — WAIT FOR EYE BLINK
       // =========================================================================
       if (_lockedEmployee != null) {
+        final empName = _lockedEmployee!['employeeName'] ?? 'Employee';
+        final String empId = _lockedEmployee!['employeeId'] ?? 'N/A';
+
         if (_isAttendanceMarked || _isFinalizingAttendance) {
           return;
         }
-        await _finalizeAttendanceForLockedEmployee();
+
+        final double? leftOpen = res['leftEyeOpen'] as double?;
+        final double? rightOpen = res['rightEyeOpen'] as double?;
+
+        if (leftOpen != null && rightOpen != null) {
+          if (leftOpen > 0.60 && rightOpen > 0.60) {
+            _hasEyesOpenedBefore = true;
+          }
+
+          // If eyes were open before and now closed (< 0.40), BLINK IS CONFIRMED!
+          if (_hasEyesOpenedBefore && (leftOpen < 0.40 || rightOpen < 0.40)) {
+            debugPrint('=== BLINK_CONFIRMED === employeeId=$empId');
+            await _finalizeAttendanceForLockedEmployee();
+            return;
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _faceDetectedInFrame = true;
+            _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to log attendance';
+          });
+        }
         return;
       }
 
@@ -357,8 +353,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                   .toList();
 
               if (cloudEmps.isNotEmpty) {
-                await _offlineDb.saveLocalEmployees(cloudEmps, businessId: widget.businessId);
-                _enrolledStaffCache = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+                _enrolledStaffCache = cloudEmps;
                 match = _faceService.matchFace(
                   targetEmbedding: targetVector,
                   enrolledEmployees: _enrolledStaffCache,
@@ -377,10 +372,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                 _lockedEmployee = match;
                 _lastRecognizedEmployee = empData;
                 _lastRecognizedName = empName;
+                _hasEyesOpenedBefore = false;
                 _isAttendanceMarked = false;
                 _noMatchFound = false;
                 _scanFailureReason = null;
-                _statusMessage = '👀 Welcome $empName! Logging attendance...';
+                _statusMessage = '👀 Welcome $empName! BLINK YOUR EYES to log attendance';
               });
 
               debugPrint('=== KIOSK_ATTENDANCE_STATE ===');
@@ -390,7 +386,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
               debugPrint('locked=true');
             }
 
-            await _finalizeAttendanceForLockedEmployee();
+            try {
+              _voiceService.speakLivenessPrompt();
+            } catch (_) {}
             return;
           } else {
             if (mounted) {
@@ -439,12 +437,28 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
       final now = DateTime.now();
       final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
-      // 1. Check for today's duplicate attendance
-      final todayRecord = await _offlineDb.getTodayAttendanceRecord(empId, dateStr);
-      final isRecentDuplicate = await _offlineDb.hasRecentAttendance(empId, dateStr);
+      // 1. Check for today's duplicate attendance directly from Firebase Firestore Cloud
+      bool isDuplicate = false;
+      String statusText = 'LOGGED';
+      try {
+        final todaySnap = await FirebaseFirestore.instance
+            .collection(AppConstants.colBusinesses)
+            .doc(widget.businessId)
+            .collection(AppConstants.colAttendance)
+            .where('employeeId', isEqualTo: empId)
+            .where('date', isEqualTo: dateStr)
+            .get()
+            .timeout(const Duration(seconds: 3));
 
-      if (todayRecord != null || isRecentDuplicate) {
-        final String statusText = todayRecord != null ? (todayRecord['status'] ?? 'LOGGED') : 'LOGGED';
+        if (todaySnap.docs.isNotEmpty) {
+          isDuplicate = true;
+          statusText = todaySnap.docs.first.data()['status'] ?? 'LOGGED';
+        }
+      } catch (e) {
+        debugPrint('Firestore duplicate check notice: $e');
+      }
+
+      if (isDuplicate) {
         debugPrint('ATTENDANCE_DUPLICATE_SKIPPED employeeId=$empId status=$statusText');
         try {
           await _voiceService.speakAlert('$name, your attendance for today is already recorded.');
@@ -458,17 +472,27 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           });
         }
       } else {
-        // Shift Evaluation
-        final localShifts = await _offlineDb.getLocalShifts(widget.businessId);
+        // Shift Evaluation directly from Firebase Firestore
         ShiftModel? matchedShift;
         final String empShiftName = empData['assignedShiftId'] ?? empData['assignedShift'] ?? '';
-        if (localShifts.isNotEmpty) {
-          final found = localShifts.firstWhere(
-            (s) => s['shiftName'] == empShiftName || s['shiftId'] == empShiftName,
-            orElse: () => localShifts.first,
-          );
-          matchedShift = ShiftModel.fromMap(found);
-        }
+        try {
+          final shiftSnap = await FirebaseFirestore.instance
+              .collection(AppConstants.colBusinesses)
+              .doc(widget.businessId)
+              .collection('shifts')
+              .get()
+              .timeout(const Duration(seconds: 3));
+
+          if (shiftSnap.docs.isNotEmpty) {
+            final found = shiftSnap.docs
+                .map((d) => d.data())
+                .firstWhere(
+                  (s) => s['shiftName'] == empShiftName || s['shiftId'] == empShiftName,
+                  orElse: () => shiftSnap.docs.first.data(),
+                );
+            matchedShift = ShiftModel.fromMap(found);
+          }
+        } catch (_) {}
 
         final shiftResult = ShiftEngineService().evaluateCheckInStatus(
           checkInTime: now,
@@ -523,7 +547,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             status: shiftResult.status,
             approvalStatus: 'APPROVED',
             confidence: confidence,
-            syncStatus: AppConstants.syncPending,
+            syncStatus: AppConstants.syncCompleted,
             isHolidayWork: isHolidayWork,
             holidayBonusStatus: isHolidayWork ? 'PENDING' : null,
             createdAt: now,
@@ -534,30 +558,17 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           debugPrint('attendanceId=${attendance.attendanceId}');
           debugPrint('status=${attendance.status}');
 
-          // 1. Save SQLite (safely wrapped)
-          try {
-            await _offlineDb.insertAttendance(attendance);
-            debugPrint('SQLITE_ATTENDANCE_INSERT_SUCCESS');
-          } catch (sqliteErr) {
-            debugPrint('SQLite insert notice: $sqliteErr');
-          }
-
-          // 2. Direct Firestore Cloud Write
+          // Direct Firebase Firestore Cloud Write
           debugPrint('FIRESTORE_ATTENDANCE_WRITE_START');
-          try {
-            await FirebaseFirestore.instance
-                .collection(AppConstants.colBusinesses)
-                .doc(widget.businessId)
-                .collection(AppConstants.colAttendance)
-                .doc(attendance.attendanceId)
-                .set(attendance.toMap());
-            debugPrint('FIRESTORE_ATTENDANCE_WRITE_SUCCESS');
-            _offlineDb.markAttendanceSynced(attendance.attendanceId);
-          } catch (err) {
-            debugPrint('Direct Firestore write notice: $err');
-          }
+          await FirebaseFirestore.instance
+              .collection(AppConstants.colBusinesses)
+              .doc(widget.businessId)
+              .collection(AppConstants.colAttendance)
+              .doc(attendance.attendanceId)
+              .set(attendance.toMap());
+          debugPrint('FIRESTORE_ATTENDANCE_WRITE_SUCCESS');
 
-          // 3. Email Alert
+          // Email Alert
           try {
             EmailNotificationService().sendPresentAttendanceEmail(
               employeeName: name,
@@ -699,7 +710,6 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     WidgetsBinding.instance.removeObserver(this);
     _announcementsSub?.cancel();
     _autoScanTimer?.cancel();
-    _hourlySyncTimer?.cancel();
     SyncEngine().stopAutoSync();
     _heartbeatService.stopHeartbeat();
     _cameraController?.dispose();
@@ -941,21 +951,14 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                             lateMinutes: shiftResult.lateMinutes,
                             approvalStatus: 'PENDING',
                             confidence: confidence,
-                            syncStatus: AppConstants.syncPending,
+                            syncStatus: AppConstants.syncCompleted,
                             isHolidayWork: isHolidayWork,
                             holidayBonusStatus: isHolidayWork ? 'PENDING' : null,
                             createdAt: now,
                             updatedAt: now,
                           );
 
-                          // 1. Save to SQLite offline DB (safely wrapped)
-                          try {
-                            await _offlineDb.insertAttendance(attendance);
-                          } catch (sqliteErr) {
-                            debugPrint('SQLite late attendance insert notice: $sqliteErr');
-                          }
-
-                          // 2. Sync to Cloud Firestore
+                          // Save directly to Firebase Firestore Cloud
                           try {
                             await FirebaseFirestore.instance
                                 .collection(AppConstants.colBusinesses)
@@ -963,9 +966,9 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                                 .collection(AppConstants.colAttendance)
                                 .doc(attendance.attendanceId)
                                 .set(attendance.toMap());
-                            await _offlineDb.markAttendanceSynced(attendance.attendanceId);
+                            debugPrint('FIRESTORE_LATE_ATTENDANCE_WRITE_SUCCESS');
                           } catch (err) {
-                            debugPrint('Cloud sync queue notice: $err');
+                            debugPrint('Firestore late attendance write notice: $err');
                           }
 
                           // 3. Email Alert
@@ -1044,12 +1047,22 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
     try {
       final result = await SyncEngine().triggerFullBidirectionalSync(widget.businessId);
 
-      // Refresh local enrolled staff cache in memory
-      final updatedLocal = await _offlineDb.getLocalEmployeesWithEmbeddings(widget.businessId);
+      final snapshot = await FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .collection(AppConstants.colEmployees)
+          .get()
+          .timeout(const Duration(seconds: 5));
+
+      final updatedLocal = snapshot.docs
+          .map((doc) => doc.data())
+          .where((emp) => emp['faceEmbedding'] != null && (emp['faceEmbedding'] as List).isNotEmpty)
+          .toList();
+
       if (mounted) {
         setState(() {
           _enrolledStaffCache = updatedLocal;
-          _statusMessage = result['message'] ?? '✓ Cloud Sync Complete!';
+          _statusMessage = '✓ Cloud Sync Complete!';
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1390,7 +1403,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                               label: Text(
                                 _isAttendanceMarked
                                     ? '✓ PRESENT TODAY • ATTENDANCE LOGGED'
-                                    : '👀 FACE IDENTIFIED • LOGGING ATTENDANCE...',
+                                    : '👀 FACE IDENTIFIED • BLINK EYES TO LOG ATTENDANCE',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: _isAttendanceMarked ? AppColors.pannaEmerald : AppColors.haldiGold,
