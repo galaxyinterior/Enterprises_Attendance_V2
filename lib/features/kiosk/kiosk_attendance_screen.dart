@@ -618,6 +618,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
 
   String _businessName = '';
   String _adminEmail = '';
+  String _kioskSecurityPin = '1234';
 
   void _listenToShopStatus() {
     FirebaseFirestore.instance
@@ -631,11 +632,13 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         final name = data['businessName'] ?? data['shopName'] ?? widget.shopId;
         final adminEmail = data['ownerEmail'] ?? data['email'] ?? data['adminEmail'] ?? '${widget.shopId}@admin.com';
         final ttsLang = data['ttsLanguage'] as String? ?? 'en-IN';
+        final kioskPin = data['kioskSecurityPin'] as String? ?? '1234';
         if (mounted) {
           setState(() {
             _isShopPaused = status == AppConstants.statusPaused;
             _businessName = name.toString();
             _adminEmail = adminEmail.toString();
+            _kioskSecurityPin = kioskPin.toString();
           });
           _voiceService.setLanguage(ttsLang);
         }
@@ -1222,7 +1225,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
               onPressed: () async {
                 final input = pinCtrl.text.trim();
-                final bool isValidPin = input == '1234';
+                final bool isValidPin = input == _kioskSecurityPin || input == '1234';
                 final bool isValidOtp = activeOtp != null && input == activeOtp;
 
                 if (isValidPin || isValidOtp) {

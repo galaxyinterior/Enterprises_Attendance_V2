@@ -303,6 +303,128 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
+  void _showKioskPinSettingsDialog() async {
+    String currentPin = '1234';
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(AppConstants.colBusinesses)
+          .doc(widget.businessId)
+          .get();
+      if (doc.exists) {
+        currentPin = (doc.data() ?? {})['kioskSecurityPin'] as String? ?? '1234';
+      }
+    } catch (_) {}
+
+    final pinCtrl = TextEditingController(text: currentPin);
+    String? errorText;
+    bool isSaving = false;
+    bool obscurePin = true;
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          backgroundColor: AppColors.cardDark,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: AppColors.cardBorderDark),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.password_rounded, color: AppColors.kesariSaffron, size: 24),
+              const SizedBox(width: 10),
+              Text('Kiosk Exit Security PIN', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Set the security PIN used by staff/admins to exit Kiosk mode on attendance terminals:',
+                  style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: pinCtrl,
+                  obscureText: obscurePin,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  style: const TextStyle(color: AppColors.textPrimary, letterSpacing: 4, fontWeight: FontWeight.bold, fontSize: 18),
+                  decoration: InputDecoration(
+                    labelText: 'Enter 4 to 6 Digit Security PIN',
+                    labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    errorText: errorText,
+                    filled: true,
+                    fillColor: AppColors.inputBgDark,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    suffixIcon: IconButton(
+                      icon: Icon(obscurePin ? Icons.visibility_off : Icons.visibility, color: AppColors.textMuted),
+                      onPressed: () => setModalState(() => obscurePin = !obscurePin),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.kesariSaffron),
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      final newPin = pinCtrl.text.trim();
+                      if (newPin.length < 4 || newPin.length > 6) {
+                        setModalState(() {
+                          errorText = 'PIN must be between 4 and 6 digits long.';
+                        });
+                        return;
+                      }
+
+                      setModalState(() => isSaving = true);
+                      final messenger = ScaffoldMessenger.of(context);
+                      try {
+                        await FirebaseFirestore.instance
+                            .collection(AppConstants.colBusinesses)
+                            .doc(widget.businessId)
+                            .set({
+                          'kioskSecurityPin': newPin,
+                        }, SetOptions(merge: true));
+
+                        if (dialogCtx.mounted) {
+                          Navigator.of(dialogCtx).pop();
+                        }
+
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('✓ Kiosk Security PIN updated to $newPin successfully!'),
+                            backgroundColor: AppColors.pannaEmerald,
+                          ),
+                        );
+                      } catch (e) {
+                        setModalState(() {
+                          isSaving = false;
+                          errorText = 'Failed to update PIN: $e';
+                        });
+                      }
+                    },
+              child: isSaving
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('SAVE PIN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -318,6 +440,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Kiosk Security PIN Settings',
+            icon: const Icon(Icons.password_rounded, color: AppColors.kesariSaffron),
+            onPressed: _showKioskPinSettingsDialog,
+          ),
           IconButton(
             tooltip: 'Kiosk Voice TTS Language Settings',
             icon: const Icon(Icons.record_voice_over_rounded, color: AppColors.haldiGold),
