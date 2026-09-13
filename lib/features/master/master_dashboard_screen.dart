@@ -37,7 +37,9 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
               child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 20),
             ),
             const SizedBox(width: 10),
-            Text('MASTER CONTROL PANEL', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+            Flexible(
+              child: Text('MASTER CONTROL PANEL', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+            ),
           ],
         ),
         actions: [
@@ -63,12 +65,15 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
           // Navigation Tabs
           Container(
             color: const Color(0xFF1E293B),
-            child: Row(
-              children: [
-                _buildTabButton('Pending Requests', 0, Icons.assignment_outlined),
-                _buildTabButton('Registered Shops', 1, Icons.store_rounded),
-                _buildTabButton('System Health & Audit Logs', 2, Icons.health_and_safety_outlined),
-              ],
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildTabButton('Pending Requests', 0, Icons.assignment_outlined),
+                  _buildTabButton('Registered Shops', 1, Icons.store_rounded),
+                  _buildTabButton('System Health & Audit Logs', 2, Icons.health_and_safety_outlined),
+                ],
+              ),
             ),
           ),
 

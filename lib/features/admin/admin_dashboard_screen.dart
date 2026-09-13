@@ -936,7 +936,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         ),
                         title: Row(
                           children: [
-                            Text(emp.fullName, style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+                            Flexible(
+                              child: Text(
+                                emp.fullName,
+                                style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                             const SizedBox(width: 8),
                             if (!emp.active)
                               Container(
@@ -1541,8 +1547,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         builder: (ctx) => AlertDialog(
           backgroundColor: AppColors.cardDark,
           title: Text('Monthly Staff Payslip Breakdown', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-          content: SizedBox(
-            width: 450,
+          content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1581,7 +1586,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: GoogleFonts.inter(color: isTotal ? AppColors.textPrimary : AppColors.textMuted, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal)),
+          Expanded(
+            child: Text(label, style: GoogleFonts.inter(color: isTotal ? AppColors.textPrimary : AppColors.textMuted, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal)),
+          ),
+          const SizedBox(width: 8),
           Text(val, style: GoogleFonts.outfit(color: isTotal ? AppColors.pannaEmerald : AppColors.textPrimary, fontWeight: isTotal ? FontWeight.bold : FontWeight.w600, fontSize: isTotal ? 16 : 14)),
         ],
       ),

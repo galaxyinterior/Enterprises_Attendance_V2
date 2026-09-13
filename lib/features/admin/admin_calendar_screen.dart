@@ -284,9 +284,12 @@ class _AdminCalendarScreenState extends State<AdminCalendarScreen> {
                             children: [
                               const Icon(Icons.stars_rounded, color: AppColors.haldiGold, size: 22),
                               const SizedBox(width: 8),
-                              Text(
-                                '🎉 Holiday Work Bonus Approvals (${pendingHolidayBonus.length})',
-                                style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                              Expanded(
+                                child: Text(
+                                  '🎉 Holiday Work Bonus Approvals (${pendingHolidayBonus.length})',
+                                  style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),

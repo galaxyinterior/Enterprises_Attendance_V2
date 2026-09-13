@@ -1295,9 +1295,11 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        'TOUCHLESS AUTO DETECT & EYE BLINK ACTIVE',
-                        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.pannaEmerald, letterSpacing: 0.5),
+                      Flexible(
+                        child: Text(
+                          'TOUCHLESS AUTO DETECT & EYE BLINK ACTIVE',
+                          style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.pannaEmerald, letterSpacing: 0.5),
+                        ),
                       ),
                     ],
                   ),
@@ -1575,12 +1577,18 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           Positioned(
             left: 20,
             bottom: 20,
-            child: Row(
-              children: [
-                const Icon(Icons.cloud_done_rounded, color: AppColors.pannaEmerald, size: 20),
-                const SizedBox(width: 8),
-                Text('Heartbeat Active • Offline Queue Protected', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12)),
-              ],
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 40),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.cloud_done_rounded, color: AppColors.pannaEmerald, size: 20),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text('Heartbeat Active • Offline Queue Protected', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 12), overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
             ),
           ),
 
