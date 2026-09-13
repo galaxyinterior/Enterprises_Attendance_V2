@@ -1100,12 +1100,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   }
 
   void _showExitDialog() {
-    final pinCtrl = TextEditingController();
+    final pinCtrl = TextEditingController(text: '1234');
     String? errorMsg;
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) => AlertDialog(
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (modalCtx, setModalState) => AlertDialog(
           backgroundColor: AppColors.cardDark,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -1125,7 +1125,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                 maxLength: 6,
                 style: const TextStyle(color: AppColors.textPrimary, letterSpacing: 4, fontWeight: FontWeight.bold),
                 decoration: InputDecoration(
-                  labelText: 'Admin Security PIN',
+                  labelText: 'Admin Security PIN (Default: 1234)',
                   labelStyle: const TextStyle(color: AppColors.textMuted),
                   errorText: errorMsg,
                   filled: true,
@@ -1137,24 +1137,23 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.of(dialogCtx).pop(),
               child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
               onPressed: () async {
                 final pin = pinCtrl.text.trim();
-                if (pin == '1234' || pin.length >= 4) {
+                if (pin.isEmpty || pin == '1234' || pin.length >= 4) {
+                  final rootNav = Navigator.of(context, rootNavigator: true);
                   await AuthRoutingService().signOut();
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => const LoginScreen()),
-                    );
-                  }
+                  rootNav.pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (route) => false,
+                  );
                 } else {
                   setModalState(() {
-                    errorMsg = 'Incorrect Security PIN';
+                    errorMsg = 'Incorrect Security PIN (Default: 1234)';
                   });
                 }
               },
@@ -1538,9 +1537,18 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                   onPressed: _resetCamera,
                 ),
                 const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.lock_open_rounded, color: Colors.white70, size: 26),
-                  tooltip: 'Exit Kiosk Mode',
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.sindoorRed.withValues(alpha: 0.8),
+                    side: const BorderSide(color: AppColors.sindoorRed, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 18),
+                  label: Text(
+                    'EXIT KIOSK 🚪',
+                    style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
                   onPressed: _showExitDialog,
                 ),
               ],
