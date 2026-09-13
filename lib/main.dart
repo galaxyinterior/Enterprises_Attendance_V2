@@ -14,17 +14,76 @@ import 'features/kiosk/kiosk_attendance_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase with generated options
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  // Catch all unhandled Flutter framework errors safely
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('⚠️ Flutter Framework Exception caught: ${details.exception}');
+  };
 
-  // Start background auto sync engine for offline attendance
-  SyncEngine().startAutoSync();
+  // Custom global error widget fallback to prevent app crash screens
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: AppColors.bgDark,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.shield_outlined, color: AppColors.kesariSaffron, size: 56),
+              const SizedBox(height: 16),
+              Text(
+                'Smart Attendance Ecosystem',
+                style: GoogleFonts.outfit(color: AppColors.textPrimary, fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Application protected from unexpected rendering error.',
+                style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.kesariSaffron),
+                icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                label: const Text('RELOAD APP', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                onPressed: () {
+                  runApp(const AttendanceApp(savedSession: null));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  };
 
-  // Check saved persistent user session
-  final authService = AuthRoutingService();
-  final savedSession = await authService.getSavedSession();
+  Map<String, dynamic>? savedSession;
+
+  try {
+    // Initialize Firebase with generated options
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+
+    // Start background auto sync engine for offline attendance
+    try {
+      SyncEngine().startAutoSync();
+    } catch (e) {
+      debugPrint('SyncEngine startAutoSync notice: $e');
+    }
+
+    // Check saved persistent user session
+    try {
+      final authService = AuthRoutingService();
+      savedSession = await authService.getSavedSession();
+    } catch (e) {
+      debugPrint('getSavedSession notice: $e');
+    }
+  } catch (e) {
+    debugPrint('Firebase.initializeApp notice: $e');
+  }
 
   runApp(AttendanceApp(savedSession: savedSession));
 }
