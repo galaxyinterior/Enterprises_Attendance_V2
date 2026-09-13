@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -616,6 +617,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   }
 
   String _businessName = '';
+  String _adminEmail = '';
 
   void _listenToShopStatus() {
     FirebaseFirestore.instance
@@ -627,10 +629,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
         final data = doc.data() ?? {};
         final status = data['status'] ?? '';
         final name = data['businessName'] ?? data['shopName'] ?? widget.shopId;
+        final adminEmail = data['ownerEmail'] ?? data['email'] ?? data['adminEmail'] ?? '${widget.shopId}@admin.com';
         if (mounted) {
           setState(() {
             _isShopPaused = status == AppConstants.statusPaused;
             _businessName = name.toString();
+            _adminEmail = adminEmail.toString();
           });
         }
       }
@@ -1100,8 +1104,12 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
   }
 
   void _showExitDialog() {
-    final pinCtrl = TextEditingController(text: '1234');
+    final pinCtrl = TextEditingController();
     String? errorMsg;
+    String? statusMsg;
+    bool isSendingOtp = false;
+    String? activeOtp;
+
     showDialog(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
@@ -1111,29 +1119,98 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(color: AppColors.cardBorderDark),
           ),
-          title: Text('Exit Kiosk Mode', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          title: Row(
             children: [
-              Text('Enter Admin Security PIN to exit kiosk mode:', style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: pinCtrl,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                style: const TextStyle(color: AppColors.textPrimary, letterSpacing: 4, fontWeight: FontWeight.bold),
-                decoration: InputDecoration(
-                  labelText: 'Admin Security PIN (Default: 1234)',
-                  labelStyle: const TextStyle(color: AppColors.textMuted),
-                  errorText: errorMsg,
-                  filled: true,
-                  fillColor: AppColors.inputBgDark,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
+              const Icon(Icons.shield_outlined, color: AppColors.kesariSaffron, size: 24),
+              const SizedBox(width: 10),
+              Text('Exit Kiosk Mode', style: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
             ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'To exit kiosk mode, enter Admin Security PIN (1234) or send OTP to Admin Email:',
+                  style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 13),
+                ),
+                const SizedBox(height: 14),
+
+                // Send OTP Button
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.haldiGold),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: isSendingOtp
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.haldiGold))
+                        : const Icon(Icons.email_outlined, color: AppColors.haldiGold, size: 18),
+                    label: Text(
+                      isSendingOtp ? 'SENDING OTP TO ADMIN EMAIL...' : 'SEND OTP TO ADMIN EMAIL 📧',
+                      style: GoogleFonts.inter(color: AppColors.haldiGold, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                    onPressed: isSendingOtp
+                        ? null
+                        : () async {
+                            setModalState(() {
+                              isSendingOtp = true;
+                              errorMsg = null;
+                              statusMsg = null;
+                            });
+
+                            final otp = (100000 + Random().nextInt(900000)).toString();
+                            activeOtp = otp;
+                            debugPrint('🔐 GENERATED KIOSK EXIT OTP: $otp');
+
+                            final recipient = _adminEmail.isNotEmpty && _adminEmail.contains('@')
+                                ? _adminEmail
+                                : '${widget.shopId}@admin.com';
+
+                            final success = await EmailNotificationService().sendKioskExitOtpEmail(
+                              recipientEmail: recipient,
+                              otpCode: otp,
+                              shopId: widget.shopId,
+                            );
+
+                            setModalState(() {
+                              isSendingOtp = false;
+                              if (success) {
+                                statusMsg = '✓ OTP sent to $recipient!';
+                              } else {
+                                statusMsg = '⚠️ Email dispatch notice (OTP: $otp)';
+                              }
+                            });
+                          },
+                  ),
+                ),
+
+                if (statusMsg != null) ...[
+                  const SizedBox(height: 8),
+                  Text(statusMsg!, style: TextStyle(color: statusMsg!.startsWith('✓') ? AppColors.pannaEmerald : AppColors.haldiGold, fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+
+                const SizedBox(height: 16),
+                TextField(
+                  controller: pinCtrl,
+                  obscureText: true,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  style: const TextStyle(color: AppColors.textPrimary, letterSpacing: 4, fontWeight: FontWeight.bold),
+                  decoration: InputDecoration(
+                    labelText: 'Enter OTP or PIN (Default: 1234)',
+                    labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    errorText: errorMsg,
+                    filled: true,
+                    fillColor: AppColors.inputBgDark,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1143,8 +1220,8 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.sindoorRed),
               onPressed: () async {
-                final pin = pinCtrl.text.trim();
-                if (pin.isEmpty || pin == '1234' || pin.length >= 4) {
+                final input = pinCtrl.text.trim();
+                if (input.isEmpty || input == '1234' || (activeOtp != null && input == activeOtp) || input.length >= 4) {
                   final rootNav = Navigator.of(context, rootNavigator: true);
                   await AuthRoutingService().signOut();
                   rootNav.pushAndRemoveUntil(
@@ -1153,7 +1230,7 @@ class _KioskAttendanceScreenState extends State<KioskAttendanceScreen> with Widg
                   );
                 } else {
                   setModalState(() {
-                    errorMsg = 'Incorrect Security PIN (Default: 1234)';
+                    errorMsg = 'Incorrect OTP or PIN (Default: 1234)';
                   });
                 }
               },

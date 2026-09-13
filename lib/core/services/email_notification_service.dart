@@ -242,5 +242,42 @@ class EmailNotificationService {
       return false;
     }
   }
+
+  Future<bool> sendKioskExitOtpEmail({
+    required String recipientEmail,
+    required String otpCode,
+    required String shopId,
+  }) async {
+    final smtpServer = gmail(_smtpUser, _smtpPassword);
+
+    final message = Message()
+      ..from = Address(_smtpUser, 'Smart Attendance Ecosystem')
+      ..recipients.add(recipientEmail.trim())
+      ..subject = '🔑 KIOSK EXIT OTP CODE: $otpCode (Shop: $shopId)'
+      ..html = '''
+        <div style="font-family: Arial, sans-serif; padding: 24px; background-color: #0f172a; color: #ffffff; border-radius: 12px; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #6366f1; margin-top: 0;">🔐 Kiosk Exit Authorization OTP</h2>
+          <p style="color: #cbd5e1; font-size: 15px;">An OTP request was triggered on Kiosk Device for <strong>Shop ID: $shopId</strong> to exit kiosk mode.</p>
+          
+          <div style="background-color: #1e293b; padding: 20px; border-radius: 10px; border-left: 4px solid #f59e0b; margin: 20px 0; text-align: center;">
+            <p style="margin: 0; color: #94a3b8; font-size: 13px; font-weight: bold; text-transform: uppercase;">YOUR 6-DIGIT EXIT OTP</p>
+            <p style="margin: 8px 0 0 0; color: #f59e0b; font-size: 36px; font-weight: bold; letter-spacing: 6px;">$otpCode</p>
+          </div>
+
+          <p style="color: #cbd5e1; font-size: 13px;">This OTP is valid for 5 minutes. Enter this code on the kiosk screen to exit kiosk mode.</p>
+          <hr style="border-color: #334155; margin: 24px 0;" />
+          <p style="color: #64748b; font-size: 12px; margin-top: 24px; text-align: center;">Smart Attendance Ecosystem — Automated Security System</p>
+        </div>
+      ''';
+
+    try {
+      final sendReport = await send(message, smtpServer);
+      debugPrint('Kiosk exit OTP email sent successfully to $recipientEmail: $sendReport');
+      return true;
+    } catch (e) {
+      debugPrint('Error sending kiosk exit OTP email: $e');
+      return false;
+    }
+  }
 }
 
